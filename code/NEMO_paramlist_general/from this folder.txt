@@ -1,0 +1,1 @@
+mdunphy/Software/NEMO36OPP/NEMOGCM/CONFIG/SHARED
