@@ -1,0 +1,23 @@
+changes required: 
+
+line 36
+overlay_target_diagram_circles
+# GO change 20230818 typo
+        #plt.plot(X, Y, 'k', 'LineWidth', option['circleLineWidth'])
+        plt.plot(X, Y, 'k', lw=option['circlelinewidth'])
+# circlelinewidth should not be capitalized. 'LineWidth' looks like typo
+
+line 58
+# GO change to fine tune 20230818
+        # plt.plot(X, Y, option['circlelinespec'],
+        #          linewidth=option['circlelinewidth'])
+        plt.plot(X, Y, color='#858585', ls='--',
+                 linewidth=option['circlelinewidth'])
+
+plot_target_axes.py
+# line 48
+    # GO Change 20230818
+    # xlabelh = plt.xlabel('uRMSD', fontsize=fontSize, horizontalalignment='left')
+    # ax.xaxis.set_label_coords(xpos, ypos, transform=ax.transData)
+    xlabelh = plt.xlabel('NCRMSD', fontsize = fontSize, horizontalalignment = 'left')
+    ax.xaxis.set_label_coords(xpos-0.3, ypos+0.1, transform=ax.transData)
