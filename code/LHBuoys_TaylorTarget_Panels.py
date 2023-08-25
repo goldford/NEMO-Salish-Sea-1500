@@ -14,6 +14,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.lines as mlines
 import skill_metrics as sm
 import pickle
 import os
@@ -35,28 +36,51 @@ modelruns_info = {  # 'SalishSea1500-RUN203': {'path': 'D:/temp_nemo/RUN203_PLOT
     #                                            'shortcode': '201905', 'experiment': True}
 }
 
-msize = 9
-arrow_mutatescale = 10
+
+arrow_mutatescale = 11
 arrow_facecolor = '#f56f6f'
 arrow_edgecolor = '#f56f6f'
 arrow_lw = 1
 
 # marker and plotting options
+msize1 = 6
+alpha = 0.8
 OPTIONS_M_SST = {
     # SST / wave buoys (others not used are ptaw1, ptww1,tcnw1,neaw1,46087,46088)
-    '46131': {'marker': "$1$", 'size': msize, 'label': '46131'},
-    '46146': {'marker': "$3$", 'size': msize, 'label': '46146'},
-    '46134': {'marker': "$2$", 'size': msize, 'label': '46134'}
+    '46131': {'marker': "o", 'size': msize1, 'label': '46131', 'mf_colour': 'w', 'me_colour': '#000000'},
+    '46146': {'marker': "o", 'size': msize1, 'label': '46146', 'mf_colour': 'k', 'me_colour': '#000000'},
+    '46134': {'marker': "o", 'size': msize1, 'label': '46134', 'mf_colour': '#814f8d', 'me_colour': '#000000'}
 }
-
-OPTIONS_M_LH = {'active_pass_LH.nc': {'marker': r'$\mathdefault{A}$', 'size': msize, 'label': 'Active Pass'},
-                'cape_mudge_LH.nc': {'marker': r'$\mathdefault{B}$', 'size': msize, 'label': 'Cape Mudge'},
-                'chrome_island_LH.nc': {'marker': r'$\mathdefault{C}$', 'size': msize, 'label': 'Chrome Is.'},
-                'entrance_island_LH.nc': {'marker': r'$\mathdefault{D}$', 'size': msize, 'label': 'Entrance Is.'},
-                'race_rocks_LH.nc': {'marker': r'$\mathdefault{E}$', 'size': msize, 'label': 'Race Rocks'},
-                'sheringham_point_LH.nc': {'marker': r'$\mathdefault{F}$', 'size': msize, 'label': 'Sheringham Pt.'},
-                'sisters_islets_LH.nc': {'marker': r'$\mathdefault{G}$', 'size': msize, 'label': 'Sisters Islets'}
+# OPTIONS_M_SST = {
+#     # SST / wave buoys (others not used are ptaw1, ptww1,tcnw1,neaw1,46087,46088)
+#     '46131': {'marker': "$1$", 'size': msize, 'label': '46131'},
+#     '46146': {'marker': "$3$", 'size': msize, 'label': '46146'},
+#     '46134': {'marker': "$2$", 'size': msize, 'label': '46134'}
+# }
+msize2=9
+OPTIONS_M_LH = {'active_pass_LH.nc': {'marker': 'P', 'size': msize2, 'label': 'Active Pass',
+                                      'mf_colour': 'w', 'me_colour': '#000000'},
+                'cape_mudge_LH.nc': {'marker': 'P', 'size': msize2, 'label': 'Cape Mudge',
+                                     'mf_colour': '#33a02c', 'me_colour': '#000000'},
+                'chrome_island_LH.nc': {'marker': 'P', 'size': msize2, 'label': 'Chrome Is.',
+                                        'mf_colour': '#000000', 'me_colour': '#000000'},
+                'entrance_island_LH.nc': {'marker': 'X', 'size': msize2, 'label': 'Entrance Is.',
+                                          'mf_colour': 'w', 'me_colour': '#000000'},
+                'race_rocks_LH.nc': {'marker': 'X', 'size': msize2, 'label': 'Race Rocks',
+                                     'mf_colour': '#fdb142', 'me_colour': '#000000'},
+                'sheringham_point_LH.nc': {'marker': 'X', 'size': msize2, 'label': 'Sheringham Pt.',
+                                           'mf_colour': '#000000', 'me_colour': '#000000'},
+                'sisters_islets_LH.nc': {'marker': 'X', 'size': msize2, 'label': 'Sisters Islets',
+                                         'mf_colour': '#409c5a', 'me_colour': '#000000'}
                 }
+# OPTIONS_M_LH = {'active_pass_LH.nc': {'marker': r'$\mathdefault{A}$', 'size': msize, 'label': 'Active Pass'},
+#                 'cape_mudge_LH.nc': {'marker': r'$\mathdefault{B}$', 'size': msize, 'label': 'Cape Mudge'},
+#                 'chrome_island_LH.nc': {'marker': r'$\mathdefault{C}$', 'size': msize, 'label': 'Chrome Is.'},
+#                 'entrance_island_LH.nc': {'marker': r'$\mathdefault{D}$', 'size': msize, 'label': 'Entrance Is.'},
+#                 'race_rocks_LH.nc': {'marker': r'$\mathdefault{E}$', 'size': msize, 'label': 'Race Rocks'},
+#                 'sheringham_point_LH.nc': {'marker': r'$\mathdefault{F}$', 'size': msize, 'label': 'Sheringham Pt.'},
+#                 'sisters_islets_LH.nc': {'marker': r'$\mathdefault{G}$', 'size': msize, 'label': 'Sisters Islets'}
+#                 }
 lh_list = []
 for lh in OPTIONS_M_LH.keys():
     lh_list.append(lh)
@@ -69,7 +93,7 @@ use_arrows = True
 fig = plt.figure(figsize=(8, 8))
 
 # it is a 2x2 plot, gs gives space for extra spacing col and row for titles, legend
-gs = gridspec.GridSpec(12, 12, figure=fig)
+gs = gridspec.GridSpec(13, 12, figure=fig)
 
 # plot the taylor diagrams in first col
 var_codes = ["T", "S"]
@@ -103,7 +127,7 @@ for var_ts in var_codes:
                       styleSTD='-', colSTD='#848484', tickSTD=tickSTD,  widthstd=0.8,# rincSTD=rincSTD,
                       styleRMS='--', colRMS='#848484', titleRMS='off', labelRMS='NCRMSD', widthRMS=0.8,
                       rmsLabelFormat='0:.1f', tickRMS=tickRMS,
-                      markerOBS='*', colOBS='k', markerSize=msize,
+                      markerOBS='*', colOBS='k', markerSize=msize1,
                       overlay='off')
 
     for run in modelruns_info.keys():
@@ -151,6 +175,8 @@ for var_ts in var_codes:
                 # plot a marker
                 try:
                     marker_dict = OPTIONS_M_LH[lh]
+                    mf_colour = marker_dict['mf_colour']
+                    me_colour = marker_dict['me_colour']
                 except:
                     print("No marker found for " + lh + ". ")
                     continue
@@ -174,6 +200,8 @@ for var_ts in var_codes:
                     y2 = r2 * np.sin(theta2)
 
                     ax = plt.gca()
+                    if mf_colour == 'w':
+                        mf_colour = 'k'
                     ax.annotate('', xy=(x2, y2),
                                 xytext=(x1, y1),
                                 arrowprops=dict(
@@ -181,8 +209,8 @@ for var_ts in var_codes:
                                     #head_width=0.7,
                                     #shrink_factor=0.2,
                                     mutation_scale=arrow_mutatescale,
-                                    facecolor=arrow_facecolor,
-                                    edgecolor=arrow_edgecolor,
+                                    facecolor=mf_colour,
+                                    edgecolor=mf_colour,
                                     lw=arrow_lw,
                                     ls='--',
                                     zorder=1
@@ -210,9 +238,10 @@ for var_ts in var_codes:
                         # symbols that are letters or numbers to work
                         markersymbol=marker_dict['marker'],
                         # markercolor=modelruns_info[run]['colour'],
-                        markercolor=color_mvg_avg,
+                        # markercolor=color_mvg_avg,
+                        markercolor=mf_colour,
                         markersize=marker_dict['size'],
-                        alpha=1.0,
+                        alpha=alpha,
                         overlay='on'
                     )
                 plt_n += 1
@@ -254,6 +283,8 @@ for var_ts in var_codes:
                     # plot one marker
                     try:
                         marker_dict = OPTIONS_M_SST[buoy_bettername]
+                        mf_colour = marker_dict['mf_colour']
+                        me_colour = marker_dict['me_colour']
                     except:
                         print("No marker found for " + buoy_bettername + ". ")
                         continue
@@ -279,6 +310,8 @@ for var_ts in var_codes:
                         y2 = r2 * np.sin(theta2)
 
                         ax = plt.gca()
+                        if mf_colour == 'w':
+                            mf_colour = '#585858'
                         ax.annotate('', xy=(x2, y2),
                                     xytext=(x1, y1),
                                     arrowprops=dict(
@@ -286,8 +319,8 @@ for var_ts in var_codes:
                                         # head_width=0.7,
                                         # shrink_factor=0.2,
                                         mutation_scale=arrow_mutatescale,
-                                        facecolor=arrow_facecolor,
-                                        edgecolor=arrow_edgecolor,
+                                        facecolor=mf_colour,
+                                        edgecolor=mf_colour,
                                         lw=arrow_lw,
                                         ls='--',
                                         zorder=1
@@ -315,9 +348,9 @@ for var_ts in var_codes:
                             # symbols that are letters or numbers to work
                             markersymbol=marker_dict['marker'],
                             # markercolor=modelruns_info[run]['colour'],
-                            markercolor=color_mvg_avg,
+                            markercolor=mf_colour,
                             markersize=marker_dict['size'],
-                            alpha=1.0,
+                            alpha=alpha,
                             overlay='on'
                         )
                     plt_n += 1
@@ -326,6 +359,7 @@ for var_ts in var_codes:
 # plot the target diagrams
 augment_rmsd = True
 var_codes = ["T", "S"]
+legend_markers_bu = []
 for var_ts in var_codes:
     # determine which subplot to put plot
     if var_ts == "T":
@@ -341,8 +375,6 @@ for var_ts in var_codes:
         circles_trg = [1.0, 2.0, 3.0]
         ticks = np.asarray([-3, -2, -1.0, 0.0, 1.0, 2.0, 3.0])
         ax.text(-2.5, 3.3, "(d)", ha="left", va="top", fontsize=12)
-
-
 
     overlay = 'off'
     for run in modelruns_info.keys():
@@ -378,6 +410,8 @@ for var_ts in var_codes:
             # plot a marker
             try:
                 marker_dict = OPTIONS_M_LH[lh]
+                mf_colour = marker_dict['mf_colour']
+                me_colour = marker_dict['me_colour']
             except:
                 print("No marker found for " + lh + ". ")
                 continue
@@ -401,6 +435,8 @@ for var_ts in var_codes:
                     y2 = stats_end[1]
 
                     ax = plt.gca()
+                    if mf_colour == 'w':
+                        mf_colour = '#585858'
                     ax.annotate('', xy=(x2, y2),
                                 xytext=(x1, y1),
                                 arrowprops=dict(
@@ -408,8 +444,8 @@ for var_ts in var_codes:
                                     # head_width=0.7,
                                     # shrink_factor=0.2,
                                     mutation_scale=arrow_mutatescale,
-                                    facecolor=arrow_facecolor,
-                                    edgecolor=arrow_edgecolor,
+                                    facecolor=mf_colour,
+                                    edgecolor=mf_colour,
                                     lw=arrow_lw,
                                     ls='--',
                                     zorder=1
@@ -437,11 +473,24 @@ for var_ts in var_codes:
                                       circlelinewidth=0.8,
                                       circlelinespec='0.75--',
                                       markersymbol=marker_dict['marker'],
-                                      markercolor=color_mvg_avg,
-                                      markerSize=msize,
+                                      markercolor=mf_colour,
+                                      markerSize=marker_dict['size'],
                                       overlay=overlay,
                                       ticks=ticks,
-                                      normalized='off')
+                                      normalized='off',
+                                      alpha=alpha)
+                    if var_ts == 'T':
+                        # for legend
+                        mark_leg = mlines.Line2D([], [],
+                                                 mfc=mf_colour,
+                                                 mec='k',
+                                                 marker=marker_dict['marker'],
+                                                 linestyle='None',
+                                                 markersize=marker_dict['size'],
+                                                 label=marker_dict['label'])
+                        legend_markers_bu.append(mark_leg)
+
+
                     overlay = 'on'
                 plt_n += 1
         LH_scores = None
@@ -474,6 +523,8 @@ for var_ts in var_codes:
                 # plot one marker
                 try:
                     marker_dict = OPTIONS_M_SST[buoy_bettername]
+                    mf_colour = marker_dict['mf_colour']
+                    me_colour = marker_dict['me_colour']
                 except:
                     print("No marker found for " + buoy_bettername + ". ")
                     continue
@@ -497,6 +548,8 @@ for var_ts in var_codes:
                         y2 = stats_end[1]
 
                         ax = plt.gca()
+                        if mf_colour == 'w':
+                            mf_colour = 'k'
                         ax.annotate('', xy=(x2, y2),
                                     xytext=(x1, y1),
                                     arrowprops=dict(
@@ -504,8 +557,8 @@ for var_ts in var_codes:
                                         # head_width=0.7,
                                         # shrink_factor=0.2,
                                         mutation_scale=arrow_mutatescale,
-                                        facecolor=arrow_facecolor,
-                                        edgecolor=arrow_edgecolor,
+                                        facecolor=mf_colour,
+                                        edgecolor=mf_colour,
                                         lw=arrow_lw,
                                         ls='--',
                                         zorder=1
@@ -534,16 +587,48 @@ for var_ts in var_codes:
                                           circlelinewidth=0.8,
                                           circlelinespec='0.75--',
                                           markersymbol=marker_dict['marker'],
-                                          markercolor=color_mvg_avg,
-                                          markerSize=msize,
+                                          markercolor=mf_colour,
+                                          markerSize=marker_dict['size'],
                                           overlay=overlay,
                                           ticks=ticks,
-                                          normalized='off')
+                                          normalized='off',
+                                          alpha=alpha)
+
+                        if var_ts == 'T':
+                            # for legend
+                            mark_leg = mlines.Line2D([], [],
+                                                     mfc=mf_colour,
+                                                     mec='k',
+                                                     marker=marker_dict['marker'],
+                                                     linestyle='None',
+                                                     markersize=marker_dict['size'],
+                                                     label=marker_dict['label'])
+                            legend_markers_bu.append(mark_leg)
                     plt_n += 1
                     stats_pack = None
                     overlay = 'on'
 
 # ax_tg.quiver(RMSDs_strt, Bs_strt, (RMSDs - RMSDs_strt), (Bs-Bs_strt), angles='xy', scale_units='xy', scale=1.1,
 #                  color='#878787', headwidth=3, minshaft=2)
+
+# legend
+ax_leg = fig.add_subplot(gs[11:, 0:11])
+ax_leg.axes.get_xaxis().set_visible(False)
+ax_leg.axes.get_yaxis().set_visible(False)
+ax_leg.spines['top'].set_visible(False)
+ax_leg.spines['right'].set_visible(False)
+ax_leg.spines['bottom'].set_visible(False)
+ax_leg.spines['left'].set_visible(False)
+
+# order the labels alphabetically then by numbers
+legend_mark_sorted = sorted(legend_markers_bu, key=lambda t: t.get_label())
+# for item in legend_mark_sorted:
+#     print(item.get_label())
+ax_leg.legend(handles = legend_mark_sorted,
+                    loc="upper center",
+                    ncol=4,
+                    bbox_to_anchor=(0.5,1.2),
+                    handletextpad=0.2,
+                    fontsize=8)
 plt.tight_layout()
 plt.show()
