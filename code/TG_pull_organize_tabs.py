@@ -15,7 +15,7 @@ station_names = [
 ]
 
 # Define the tidal constituents you want to extract
-tidal_constituents = ['K1', 'O1', 'P1', 'Q1', 'M2', 'K2', 'N2']
+tidal_constituents = ['K1', 'O1', 'P1', 'Q1', 'M2', 'K2', 'N2', 'S2']
 
 # Regular expression pattern to match the desired CSV filenames
 file_pattern = re.compile(r'TG_year2018_(\w+)_RUN216.csv')
