@@ -22,8 +22,8 @@ dat_f = 'Nanoose_obs_anom_temp_1980-2018.nc'
 #dat_f = 'RUN203mod_anom_temp_1980-2018.nc'
 
 # ==== Spatial-temporal settings ====
-depth_min = 0
-depth_max = 30
+depth_min = 4.5
+depth_max = 400
 
 # ==== Load Data ====
 var = "temperature"
@@ -97,9 +97,7 @@ else:
     print("Residuals are unlikely to be drawn from a normal distribution. Non-parametric methods for CI estimation should be considered.")
     type_CI = "non-parametric"
 
-# To do - are they non-normal if averaged to monthly, seasonal, annual?
-
-# ==== test for seasonality using FFT ====
+# ==== Test for Seasonality using FFT ====
 freq, power_spec = do_fft(dat_davg_dtrnd, len(dat_davg_dtrnd))
 peak_indices = np.argsort(power_spec)[::-1][:5]  # Top 5 peaks
 peak_frequencies = np.abs(freq[peak_indices])    # corresponding frequencies
@@ -122,26 +120,25 @@ if subannual_freq_tf:
 else:
     print("Subannual cycles are not detected in anomaly residuals.")
 
+# ==== Compute Autocorrelation Function =====
+alpha = 0.05
+nlags = len(residuals)-1
+acf_values = acf(residuals.values, adjusted=True, fft=False, alpha=alpha, nlags=nlags, missing="conservative")
+plot_acf(residuals.data, adjusted=True, fft=False, alpha=alpha, lags=nlags)
+plt.title('Autocorrelation Function with Confidence Intervals')
+plt.xlabel('Lag')
+plt.ylabel('Autocorrelation (-1, 1)')
+plt.show()
+AR1_coef = acf_values[0][1]
+print("The AR(1) Coefficient:", AR1_coef)
+
+# ====  Parametric Trend Detection =====
 type_CI = "parametric"
 if type_CI == "parametric":
-
     print("proceeding with CI estimation using decorrelation time scale")
-    # - ACF and Decorr Time Scale (AR1)
-    alpha = 0.05
-    nlags = 48
-
-    acf_values = acf(residuals.values, adjusted=True, fft=False, alpha=alpha, nlags=nlags, missing="conservative")
-    plot_acf(residuals.data, adjusted=True, fft=False, alpha=alpha, lags=len(residuals)-1)
-    plt.title('Autocorrelation Function with Confidence Intervals')
-    plt.xlabel('Lag')
-    plt.ylabel('Autocorrelation (-1, 1)')
-    plt.show()
-
-    AR1_coef = acf_values[0][1]
     DTS = (1 + AR1_coef) / (1 - AR1_coef) # decorr. time scale in ts units
     ESS = len(dat_davg) / DTS          # effective sample size
 
-    print("The AR(1) Coefficient:", AR1_coef)
     print("The Decorrelation Time Scale (DTS; units: yr): ", DTS / dat_ts)
     print("The Effective Sample Size (ESS): ", ESS)
 
@@ -156,7 +153,7 @@ if type_CI == "parametric":
     print(f"Confidence Interval (95%): {confidence_interval}")
     print(f"P val:  {p_val_dst}")
 
-# 2) Non-Parametric Trend Detection
+# ==== Non-Parametric Trend Detection ====
 # - MK w/ Prewhitening (e.g., 3PW)
 type_CI = "nonparametric"
 resolution = 0.0001 # of measurements to use in ties calc in Kendalls Tau and S
@@ -164,7 +161,6 @@ if time_inc == "annual": seasons_per_year = 1
 elif time_inc == "seasonal": seasons_per_year = 4
 elif time_inc == "monthly": seasons_per_year = 12
 elif time_inc == "biweekly": seasons_per_year = 24
-
 if type_CI == "nonparametric":
     print("MK w/ Sens and 3PW method")
     seasonal_dates = []
