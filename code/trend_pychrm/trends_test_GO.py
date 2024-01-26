@@ -22,8 +22,8 @@ dat_f = 'Nanoose_obs_anom_temp_1980-2018.nc'
 #dat_f = 'RUN203mod_anom_temp_1980-2018.nc'
 
 # ==== Spatial-temporal settings ====
-depth_min = 4.5
-depth_max = 400
+depth_min = 0
+depth_max = 30
 
 # ==== Load Data ====
 var = "temperature"
@@ -131,18 +131,18 @@ if type_CI == "parametric":
     nlags = 48
 
     acf_values = acf(residuals.values, adjusted=True, fft=False, alpha=alpha, nlags=nlags, missing="conservative")
-    # plot_acf(residuals.data, adjusted=True, fft=False, alpha=alpha, lags=96)
-    # plt.title('Autocorrelation Function with Confidence Intervals')
-    # plt.xlabel('Lag')
-    # plt.ylabel('Autocorrelation (-1, 1)')
-    # plt.show()
+    plot_acf(residuals.data, adjusted=True, fft=False, alpha=alpha, lags=len(residuals)-1)
+    plt.title('Autocorrelation Function with Confidence Intervals')
+    plt.xlabel('Lag')
+    plt.ylabel('Autocorrelation (-1, 1)')
+    plt.show()
 
     AR1_coef = acf_values[0][1]
-    DTS = (1 + AR1_coef) / (1 - AR1_coef) # decorr. time scale
+    DTS = (1 + AR1_coef) / (1 - AR1_coef) # decorr. time scale in ts units
     ESS = len(dat_davg) / DTS          # effective sample size
 
     print("The AR(1) Coefficient:", AR1_coef)
-    print("The Decorrelation Time Scale (DTS; units: yr): ", DTS)
+    print("The Decorrelation Time Scale (DTS; units: yr): ", DTS / dat_ts)
     print("The Effective Sample Size (ESS): ", ESS)
 
     # adjust sample size downward
@@ -159,10 +159,40 @@ if type_CI == "parametric":
 # 2) Non-Parametric Trend Detection
 # - MK w/ Prewhitening (e.g., 3PW)
 type_CI = "nonparametric"
+resolution = 0.0001 # of measurements to use in ties calc in Kendalls Tau and S
+if time_inc == "annual": seasons_per_year = 1
+elif time_inc == "seasonal": seasons_per_year = 4
+elif time_inc == "monthly": seasons_per_year = 12
+elif time_inc == "biweekly": seasons_per_year = 24
+
 if type_CI == "nonparametric":
-    print("To do")
-
-
+    print("MK w/ Sens and 3PW method")
+    seasonal_dates = []
+    dat_multi = []
+    if seasons_per_year == 1:
+        out = mk.mk_temp_aggr(time_pydatetime, np.asarray(dat_davg), resolution)
+        print(out)
+    else:
+        for season in range(1, seasons_per_year + 1):
+            if seasons_per_year == 24:
+                indices = np.where(
+                    (dat_davg[time_nm].dt.dayofyear >= (season * 15) - 10) &
+                    (dat_davg[time_nm].dt.dayofyear < ((season + 1) * 15) - 10))[0]
+            elif seasons_per_year == 12:
+                indices = np.where(dat_davg[time_nm].dt.month == season)
+            elif seasons_per_year == 4:
+                if season == 1: season_name = "winter"
+                elif season == 2: season_name = "spring"
+                elif season == 3: season_name = "summer"
+                elif season == 4: season_name = "fall"
+                else: print("error w/ seasons")
+                indices = np.where(dat_davg['season'] == season_name)
+            seasonal_dates.append((time_pydatetime[indices]))
+            dat_multi.append((dat_davg[indices]))
+        out = mk.mk_temp_aggr(seasonal_dates, dat_multi, resolution)
+        for n in range(seasons_per_year):
+            print('Season {ind}:'.format(ind=n + 1), out[n])
+        print('Overall: ', out[len(out)-1])
 
 
 # to do, bootstrap

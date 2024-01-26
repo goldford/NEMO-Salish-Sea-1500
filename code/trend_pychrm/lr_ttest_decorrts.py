@@ -23,7 +23,7 @@ import sys
 print(sys.version)
 from linregress_GO import linregress_GO
 from GO_tools import get_meshmask, depth_int
-
+import mannkendall as mk
 
 meshm_p = '../../data/mesh mask/'
 meshm_f = 'mesh_mask_20210406.nc'
