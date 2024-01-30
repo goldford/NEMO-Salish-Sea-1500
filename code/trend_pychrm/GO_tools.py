@@ -10,57 +10,67 @@ import pandas as pd
 import mannkendall as mk
 from scipy import stats
 from scipy.stats import linregress
+from linregress_GO import linregress_GO
 from statsmodels.stats.diagnostic import het_goldfeldquandt, het_white
 from statsmodels.tools.tools import add_constant
 from statsmodels.tsa.stattools import acf
 
-def dst_trend_sig():
+def mk3pw_trend_sig(seasons_per_year, resolution, dat, dat_pytime, dat_seas, dat_pytime_seas):
+    mk_3pw_out = []
+
+    print("MK w/ Sens and 3PW method")
+    if seasons_per_year == 1:
+        out = mk.mk_temp_aggr(dat_pytime, np.asarray(dat), resolution)
+        mk_3pw_out.append({"season " + str(1): out})
+    else:
+        print("Seasons analysed individually:")
+        for season in range(1, seasons_per_year + 1):
+            out = mk.mk_temp_aggr([dat_pytime_seas[season - 1]], [dat_seas[season - 1]], resolution)
+            mk_3pw_out.append({"season " + str(season): out[0]})
+        out = mk.mk_temp_aggr(dat_pytime_seas, dat_seas, resolution)
+        mk_3pw_out.append({"all seasons": out})
+
+
+    return mk_3pw_out
+
+def dst_trend_sig(summary_stats_all, dat_ts, alpha, dat, dat_seas, dat_numerictime, dat_numerictime_seas):
     # created by G Oldford Jan 29
+    # purpose: use decorrelation time scale to estimate confidence intervals around secular trend slope
+    #
+    DTS_CI_out = []
+    for seas in range(0, len(summary_stats_all)):
+        for key in summary_stats_all[seas].keys():
+            AR1_coef = summary_stats_all[seas][key]['acf-ar1-coeff']
+            DTS = (1 + AR1_coef) / (1 - AR1_coef)  # decorr. time scale in ts units
+            if key == 'all seasons':
+                ESS = len(dat) / DTS  # effective sample size
+                dat_np = np.asarray(dat.values)
+                dat_ntime = dat_numerictime
+            else:
+                i = 0
+                for s2 in dat_seas:
+                    if i == seas:
+                        ESS = len(dat_seas[i]) / DTS
+                        dat_np = np.asarray(dat_seas[i].values)
+                        dat_ntime = dat_numerictime_seas[i]
+                    i += 1
+            print("The Decorrelation Time Scale (DTS; units: yr): ", DTS / dat_ts)
+            print("The Effective Sample Size (ESS): ", ESS)
 
-    
+            slope_dst, inter_dst, r_val_dst, p_val_dst, std_err_dst, _ = linregress_GO(dat_ntime, dat_np, ESS)
+            df = ESS - 2
+            t_critical = stats.t.ppf((1 + (1 - alpha)) / 2, df)
+            margin_of_error = t_critical * std_err_dst
+            confidence_interval = ((slope_dst - margin_of_error) * 365, (slope_dst + margin_of_error) * 365)
+            slope_dst = slope_dst * 365
+            DTS_CI_out.append({key: {"slope": slope_dst, "inter": inter_dst,
+                                     "r_val": r_val_dst, "p_val": p_val_dst,
+                                     "std_err": std_err_dst, "slope_lcl": confidence_interval[0],
+                                     "slope_ucl": confidence_interval[1]}})
+            print("Slope from LR for season ", key, ": ", str(slope_dst), " lcl:", str(confidence_interval[0]),
+                  " ucl:", str(confidence_interval[1]), " pval (DST):", str(p_val_dst))
 
-    print("proceeding with CI estimation using decorrelation time scale")
-    DTS = (1 + AR1_coef) / (1 - AR1_coef)  # decorr. time scale in ts units
-    ESS = len(dat_davg) / DTS  # effective sample size
-
-    print("The Decorrelation Time Scale (DTS; units: yr): ", DTS / dat_ts)
-    print("The Effective Sample Size (ESS): ", ESS)
-
-    for season in range(0, seasons_per_year):
-        dat_davg_np = np.asarray(dat_seas[season].values)
-        d1 = seasonal_dates_numeric[season]
-        slope_dst, inter_dst, r_val_dst, p_val_dst, std_err_dst, _ = linregress_GO(d1,
-                                                                                   dat_davg_np, ESS)
-        df = ESS - 2
-
-        t_critical = stats.t.ppf((1 + (1 - alpha)) / 2, df)
-        margin_of_error = t_critical * std_err_dst
-        confidence_interval = ((slope_dst - margin_of_error) * 365, (slope_dst + margin_of_error) * 365)
-        slope_dst = slope_dst * 365
-        DTS_CI_out.append({"season " + str(season): {"slope": slope_dst, "inter": inter_dst,
-                                                     "r_val": r_val_dst, "p_val": p_val_dst,
-                                                     "std_err": std_err_dst, "slope_lcl": confidence_interval[0],
-                                                     "slope_ucl": confidence_interval[1]}})
-        print("Slope from LR for season ", str(season), ": ", str(slope_dst), " lcl:", str(confidence_interval[0]),
-              " ucl:", str(confidence_interval[1]), " pval (DST):", str(p_val_dst))
-    # adjust sample size downward
-    slope_dst, inter_dst, r_val_dst, p_val_dst, std_err_dst, _ = linregress_GO(dat_numerictime.values,
-                                                                               dat_davg.values,
-                                                                               ESS)
-    df = ESS - 2
-    t_critical = stats.t.ppf((1 + (1 - alpha)) / 2, df)
-    margin_of_error = t_critical * std_err_dst
-    confidence_interval = ((slope_dst - margin_of_error) * 365, (slope_dst + margin_of_error) * 365)
-    slope_dst = slope_dst * 365
-    DTS_CI_out.append({"all seasons": {"slope": slope_dst, "inter": inter_dst,
-                                       "r_val": r_val_dst, "p_val": p_val_dst,
-                                       "std_err": std_err_dst, "slope_lcl": confidence_interval[0],
-                                       "slope_ucl": confidence_interval[1]}})
-    print(f"Slope: {slope_dst * 365}")
-    print(f"Confidence Interval (95%): {confidence_interval}")
-    print(f"P val:  {p_val_dst}")
-
-    return
+    return DTS_CI_out
 
 def do_summary_stats(slopes, slope_method, dat_ts, dat, dat_timenumeric, dat_seas, dat_timenumeric_seas,
                      alpha_acf=0.05):

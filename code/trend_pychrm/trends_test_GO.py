@@ -2,10 +2,13 @@ import os
 import numpy as np
 import xarray as xr
 from GO_tools import (get_meshmask, depth_int, do_fft, do_seasonal_avg,
-                      do_ss_seasons, do_lr_seasons, prep_data_seas, do_summary_stats)
+                      do_ss_seasons, do_lr_seasons, prep_data_seas, do_summary_stats,
+                      dst_trend_sig, mk3pw_trend_sig)
+import datetime as dt
+
+# below to be removed
 from linregress_GO import linregress_GO
 from scipy import stats
-import datetime as dt
 import mannkendall as mk
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import acf
@@ -28,7 +31,7 @@ depth_max = 400
 var = "temperature"
 resolution = 0.0001 # measurement precision, for Kendall's tau etc
 remove_nans = True
-time_inc = "monthly" # biweekly, monthly, seasonal, annual
+time_inc = "seasonal" # biweekly, monthly, seasonal, annual
 if time_inc == "annual": seasons_per_year = 1
 elif time_inc == "seasonal": seasons_per_year = 4
 elif time_inc == "monthly": seasons_per_year = 12
@@ -51,31 +54,23 @@ if remove_nans:
 # ==== Time Averaging ====
 # monthly, seasonal, and annual come in handy later (assumes dataset is biweekly)
 print("Using ", time_inc, " avg")
-dat_davg, dat_ts, time_nm = do_seasonal_avg(dat_davg,time_inc)
+dat_davg, dat_ts, time_dim = do_seasonal_avg(dat_davg,time_inc)
 
 # ==== Deal with time, datetime, etc ====
-start_date = dat_davg[time_nm].values[0]
+start_date = dat_davg[time_dim].values[0]
 #  assumes 'time_counter' is in datetime64 format
-dat_numerictime = (dat_davg[time_nm] - start_date) / np.timedelta64(1, 'D')
-time_datetime64 = np.array(dat_davg[time_nm], dtype='datetime64[s]')
+dat_numerictime = (dat_davg[time_dim] - start_date) / np.timedelta64(1, 'D')
+time_datetime64 = np.array(dat_davg[time_dim], dtype='datetime64[s]')
 #  painful to convert to py datetime but is required for mk
-dat_pytime = np.array([dt.datetime(year, month, day) for year, month, day in zip(dat_davg[time_nm].dt.year.values,
-                                                                                dat_davg[time_nm].dt.month.values,
-                                                                            dat_davg[time_nm].dt.day.values)])
+dat_pytime = np.array([dt.datetime(year, month, day) for year, month, day in zip(dat_davg[time_dim].dt.year.values,
+                                                                                dat_davg[time_dim].dt.month.values,
+                                                                            dat_davg[time_dim].dt.day.values)])
 # split seasons
-dat_seas, seasonal_dates, seasonal_dates_numeric = prep_data_seas(dat_davg, dat_pytime, dat_numerictime,
-                                                                  seasons_per_year, time_nm)
+dat_seas, dat_pytime_seas, dat_timenumeric_seas = prep_data_seas(dat_davg, dat_pytime, dat_numerictime,
+                                                                  seasons_per_year, time_dim)
 # slopes from linear regression and alt method theil-sen aka sen's
-LR_slopes = do_lr_seasons(dat_davg, dat_seas, dat_numerictime, seasonal_dates_numeric, seasons_per_year)
-SS_slopes = do_ss_seasons(dat_davg, dat_seas, dat_pytime, seasonal_dates, seasons_per_year, resolution)
-
-# for each season individually, and all as a whole, do:
-# Detrend
-# Test residuals for normality
-# Test residuals for heteroskedacity
-# use FFT to test resids for periocity
-# compute ACF and AR1 Coeff
-
+LR_slopes = do_lr_seasons(dat_davg, dat_seas, dat_numerictime, dat_timenumeric_seas, seasons_per_year)
+SS_slopes = do_ss_seasons(dat_davg, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_year, resolution)
 
 # ==== Detrend ====
 # (to do) - try detrend seasonally
@@ -84,11 +79,40 @@ slope_method = "SS"
 if slope_method == "SS": slopes = SS_slopes
 elif slope_method == "LR": slopes = LR_slopes
 else: print("error with slope method")
-summary_stats_all = do_summary_stats(slopes, slope_method, dat_ts, dat, dat_numerictime, dat_seas, seasonal_dates_numeric)
+summary_stats_all = do_summary_stats(slopes, slope_method, dat_ts, dat_davg, dat_numerictime, dat_seas, dat_timenumeric_seas)
+
+# ====  Parametric Trend Detection =====
+# use LR or SS with adjusted ESS from DST
+type_CI = "parametric"
+DTS_CI_out = []
+alpha = 0.05
+if type_CI == "parametric":
+    DTS_CI_out = dst_trend_sig(summary_stats_all, dat_ts, alpha, dat_davg, dat_seas, dat_numerictime, dat_timenumeric_seas)
+
+# ==== Non-Parametric Trend Detection ====
+# - MK w/ Prewhitening (e.g., 3PW)
+type_CI = "nonparametric"
+resolution = 0.0001  # of measurements to use in ties calc in Kendalls Tau and S
+if type_CI == "nonparametric":
+    print("MK w/ Sens and 3PW method")
+    mk_3pw_out = mk3pw_trend_sig(seasons_per_year, resolution, dat_davg, dat_pytime, dat_seas, dat_pytime_seas)
+
+print(mk_3pw_out)
+
+
+
+
+
+# for each season individually, and all as a whole, do:
+# Detrend
+# Test residuals for normality
+# Test residuals for heteroskedacity
+# use FFT to test resids for periocity
+# compute ACF and AR1 Coeff
 
 # ==== Test Normality ====
 # Test resid for norm using Shapiro-Wilks
-# residuals = dat_davg_dtrnd
+#residuals = dat_davg_dtrnd
 # stat, p_value = stats.shapiro(residuals)
 # print(f'Shaprio Wilks Statistic: {stat}, p-value: {p_value}')
 # if p_value > 0.05:
@@ -141,76 +165,66 @@ summary_stats_all = do_summary_stats(slopes, slope_method, dat_ts, dat, dat_nume
 # AR1_coef = acf_values[0][1]
 # print("The AR(1) Coefficient:", AR1_coef)
 
-# ====  Parametric Trend Detection =====
-type_CI = "parametric"
-DTS_CI_out = []
-alpha = 0.05
-if type_CI == "parametric":
+    # #
+    # # print("proceeding with CI estimation using decorrelation time scale")
+    # DTS = (1 + AR1_coef) / (1 - AR1_coef) # decorr. time scale in ts units
+    # ESS = len(dat_davg) / DTS             # effective sample size
+    #
+    # print("The Decorrelation Time Scale (DTS; units: yr): ", DTS / dat_ts)
+    # print("The Effective Sample Size (ESS): ", ESS)
+    #
+    # for season in range(0, seasons_per_year):
+    #     dat_davg_np = np.asarray(dat_seas[season].values)
+    #     d1 = seasonal_dates_numeric[season]
+    #     slope_dst, inter_dst, r_val_dst, p_val_dst, std_err_dst, _ = linregress_GO(d1,
+    #                                                                                dat_davg_np, ESS)
+    #     df = ESS - 2
+    #
+    #     t_critical = stats.t.ppf((1 + (1 - alpha)) / 2, df)
+    #     margin_of_error = t_critical * std_err_dst
+    #     confidence_interval = ((slope_dst - margin_of_error) * 365, (slope_dst + margin_of_error) * 365)
+    #     slope_dst = slope_dst * 365
+    #     DTS_CI_out.append({"season " + str(season):{"slope": slope_dst, "inter": inter_dst,
+    #                                                 "r_val": r_val_dst, "p_val": p_val_dst,
+    #                                                 "std_err": std_err_dst, "slope_lcl": confidence_interval[0],
+    #                                                 "slope_ucl": confidence_interval[1]}})
+    #     print("Slope from LR for season ", str(season), ": ", str(slope_dst), " lcl:", str(confidence_interval[0]),
+    #           " ucl:", str(confidence_interval[1]), " pval (DST):", str(p_val_dst))
+    # # adjust sample size downward
+    # slope_dst, inter_dst, r_val_dst, p_val_dst, std_err_dst, _ = linregress_GO(dat_numerictime.values,
+    #                                                                            dat_davg.values,
+    #                                                                            ESS)
+    # df = ESS - 2
+    # t_critical = stats.t.ppf((1 + (1-alpha)) / 2, df)
+    # margin_of_error = t_critical * std_err_dst
+    # confidence_interval = ((slope_dst - margin_of_error) * 365, (slope_dst + margin_of_error) * 365)
+    # slope_dst = slope_dst * 365
+    # DTS_CI_out.append({"all seasons": {"slope": slope_dst, "inter": inter_dst,
+    #                                    "r_val": r_val_dst, "p_val": p_val_dst,
+    #                                    "std_err": std_err_dst, "slope_lcl": confidence_interval[0],
+    #                                    "slope_ucl": confidence_interval[1]}})
+    # print(f"Slope: {slope_dst*365}")
+    # print(f"Confidence Interval (95%): {confidence_interval}")
+    # print(f"P val:  {p_val_dst}")
 
-    print("proceeding with CI estimation using decorrelation time scale")
-    DTS = (1 + AR1_coef) / (1 - AR1_coef) # decorr. time scale in ts units
-    ESS = len(dat_davg) / DTS             # effective sample size
 
-    print("The Decorrelation Time Scale (DTS; units: yr): ", DTS / dat_ts)
-    print("The Effective Sample Size (ESS): ", ESS)
 
-    for season in range(0, seasons_per_year):
-        dat_davg_np = np.asarray(dat_seas[season].values)
-        d1 = seasonal_dates_numeric[season]
-        slope_dst, inter_dst, r_val_dst, p_val_dst, std_err_dst, _ = linregress_GO(d1,
-                                                                                   dat_davg_np, ESS)
-        df = ESS - 2
-
-        t_critical = stats.t.ppf((1 + (1 - alpha)) / 2, df)
-        margin_of_error = t_critical * std_err_dst
-        confidence_interval = ((slope_dst - margin_of_error) * 365, (slope_dst + margin_of_error) * 365)
-        slope_dst = slope_dst * 365
-        DTS_CI_out.append({"season " + str(season):{"slope": slope_dst, "inter": inter_dst,
-                                                    "r_val": r_val_dst, "p_val": p_val_dst,
-                                                    "std_err": std_err_dst, "slope_lcl": confidence_interval[0],
-                                                    "slope_ucl": confidence_interval[1]}})
-        print("Slope from LR for season ", str(season), ": ", str(slope_dst), " lcl:", str(confidence_interval[0]),
-              " ucl:", str(confidence_interval[1]), " pval (DST):", str(p_val_dst))
-    # adjust sample size downward
-    slope_dst, inter_dst, r_val_dst, p_val_dst, std_err_dst, _ = linregress_GO(dat_numerictime.values,
-                                                                               dat_davg.values,
-                                                                               ESS)
-    df = ESS - 2
-    t_critical = stats.t.ppf((1 + (1-alpha)) / 2, df)
-    margin_of_error = t_critical * std_err_dst
-    confidence_interval = ((slope_dst - margin_of_error) * 365, (slope_dst + margin_of_error) * 365)
-    slope_dst = slope_dst * 365
-    DTS_CI_out.append({"all seasons": {"slope": slope_dst, "inter": inter_dst,
-                                       "r_val": r_val_dst, "p_val": p_val_dst,
-                                       "std_err": std_err_dst, "slope_lcl": confidence_interval[0],
-                                       "slope_ucl": confidence_interval[1]}})
-    print(f"Slope: {slope_dst*365}")
-    print(f"Confidence Interval (95%): {confidence_interval}")
-    print(f"P val:  {p_val_dst}")
-
-# ==== Non-Parametric Trend Detection ====
-# - MK w/ Prewhitening (e.g., 3PW)
-type_CI = "nonparametric"
-resolution = 0.0001 # of measurements to use in ties calc in Kendalls Tau and S
-mk_3pw_out = []
-if type_CI == "nonparametric":
-    print("MK w/ Sens and 3PW method")
-    if seasons_per_year == 1:
-        out = mk.mk_temp_aggr(dat_pytime, np.asarray(dat_davg), resolution)
-        mk_3pw_out.append({"Season " + str(season): out})
-        print(out)
-    else:
-        print("Seasons analysed individually:")
-        for season in range(1, seasons_per_year + 1):
-            out = mk.mk_temp_aggr([seasonal_dates[season-1]], [dat_seas[season-1]], resolution)
-            mk_3pw_out.append({"season " + str(season): out[0]})
-            print(season, ": ", out)
-        out = mk.mk_temp_aggr(seasonal_dates, dat_seas, resolution)
-        mk_3pw_out.append({"all seasons": out})
-        print("Seasons taken together:")
-        for n in range(seasons_per_year):
-            print('Season {ind}:'.format(ind=n + 1), out[n])
-        print('Overall: ', out[len(out)-1])
+    # if seasons_per_year == 1:
+    #     out = mk.mk_temp_aggr(dat_pytime, np.asarray(dat_davg), resolution)
+    #     mk_3pw_out.append({"Season " + str(season): out})
+    #     print(out)
+    # else:
+    #     print("Seasons analysed individually:")
+    #     for season in range(1, seasons_per_year + 1):
+    #         out = mk.mk_temp_aggr([seasonal_dates[season-1]], [dat_seas[season-1]], resolution)
+    #         mk_3pw_out.append({"season " + str(season): out[0]})
+    #         print(season, ": ", out)
+    #     out = mk.mk_temp_aggr(seasonal_dates, dat_seas, resolution)
+    #     mk_3pw_out.append({"all seasons": out})
+    #     print("Seasons taken together:")
+    #     for n in range(seasons_per_year):
+    #         print('Season {ind}:'.format(ind=n + 1), out[n])
+    #     print('Overall: ', out[len(out)-1])
 
 #return: all seasons together, separately - slope, upper, lower cl, p val, ar1 coeff
 # to do, bootstrap
