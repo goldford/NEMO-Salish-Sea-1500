@@ -15,28 +15,50 @@ from statsmodels.stats.diagnostic import het_goldfeldquandt, het_white
 from statsmodels.tools.tools import add_constant
 from statsmodels.tsa.stattools import acf
 
-def mk3pw_trend_sig(seasons_per_year, resolution, dat, dat_pytime, dat_seas, dat_pytime_seas):
-    mk_3pw_out = []
+def mk3pw_trend_sig(seasons_per_year, resolution, alpha_mk, dat, dat_pytime, dat_seas, dat_pytime_seas):
+    #created Jan 2024 by G Oldford
+    # purpose: implement the '3PW' approach to prewhitening to account for autocorrelation
+    #          as described in Collaud Coen et al 2020; https://doi.org/10.5194/amt-13-6945-2020
+    # inputs:
+    #    seasons_per_year  - integer; number of seasons in a year
+    #    resolution        - float; the precision of the measurements in the data
+    #    alpha_mk          - the confidence level threshold for mann-kendall (e.g., 0.95 for 95%)
+    #    dat               - DataArray; xarray dataarray with one var
+    #    dat_pytime        - ndarray; numpy array of dates as python datetime, as required by mk
+    #    dat_seas          - DataArray; list of xarray DataArrays with seasonal data
+    #    dat_pytime_seas   - list; list of ndarray numpy arrays with python datetimes, one list element for each season
+    # returns:
+    #    mk_3pw_out  - a list of dictionary elements with stats outputs
 
+    mk_3pw_out = []
     print("MK w/ Sens and 3PW method")
     if seasons_per_year == 1:
-        out = mk.mk_temp_aggr(dat_pytime, np.asarray(dat), resolution)
+        out = mk.mk_temp_aggr(dat_pytime, np.asarray(dat), resolution, alpha_mk=alpha_mk)
         mk_3pw_out.append({"season " + str(1): out})
     else:
         print("Seasons analysed individually:")
         for season in range(1, seasons_per_year + 1):
-            out = mk.mk_temp_aggr([dat_pytime_seas[season - 1]], [dat_seas[season - 1]], resolution)
+            out = mk.mk_temp_aggr([dat_pytime_seas[season - 1]], [dat_seas[season - 1]],
+                                  resolution, alpha_mk=alpha_mk)
             mk_3pw_out.append({"season " + str(season): out[0]})
         out = mk.mk_temp_aggr(dat_pytime_seas, dat_seas, resolution)
         mk_3pw_out.append({"all seasons": out})
-
-
     return mk_3pw_out
 
 def dst_trend_sig(summary_stats_all, dat_ts, alpha, dat, dat_seas, dat_numerictime, dat_numerictime_seas):
     # created by G Oldford Jan 29
     # purpose: use decorrelation time scale to estimate confidence intervals around secular trend slope
-    #
+    # inputs:
+    #    summary_stats_all    - list; list of dictionary elements with stats necessary to run the trend analysis
+    #    dat_ts               - integer; data time scale, the number of data points within a year (i.e., 'seasons')
+    #    alpha                - float; threshold for conf. level using t-test (e.g., 0.05 for 95% CL, two tailed)
+    #    dat                  - DataArray; xarray dataarray with one var
+    #    dat_seas             - list; list of xarray data arrays, one list element for each season
+    #    dat_numerictime      - DataArray; xarray datarray of time as numeric units (days)
+    #    dat_numerictime_seas - list; list of xarray dataarrays, one list element for each season
+    # returns:
+    #    DTS_CI_out  - a list of dictionary elements with results of the decorrelation time scale analysis of trend sig
+
     DTS_CI_out = []
     for seas in range(0, len(summary_stats_all)):
         for key in summary_stats_all[seas].keys():
@@ -46,6 +68,8 @@ def dst_trend_sig(summary_stats_all, dat_ts, alpha, dat, dat_seas, dat_numericti
                 ESS = len(dat) / DTS  # effective sample size
                 dat_np = np.asarray(dat.values)
                 dat_ntime = dat_numerictime
+                DTS_yr = DTS / dat_ts
+
             else:
                 i = 0
                 for s2 in dat_seas:
@@ -53,8 +77,9 @@ def dst_trend_sig(summary_stats_all, dat_ts, alpha, dat, dat_seas, dat_numericti
                         ESS = len(dat_seas[i]) / DTS
                         dat_np = np.asarray(dat_seas[i].values)
                         dat_ntime = dat_numerictime_seas[i]
+                        DTS_yr = DTS
                     i += 1
-            print("The Decorrelation Time Scale (DTS; units: yr): ", DTS / dat_ts)
+            print("The Decorrelation Time Scale (DTS; units: yr): ", DTS_yr)
             print("The Effective Sample Size (ESS): ", ESS)
 
             slope_dst, inter_dst, r_val_dst, p_val_dst, std_err_dst, _ = linregress_GO(dat_ntime, dat_np, ESS)
@@ -65,7 +90,9 @@ def dst_trend_sig(summary_stats_all, dat_ts, alpha, dat, dat_seas, dat_numericti
             slope_dst = slope_dst * 365
             DTS_CI_out.append({key: {"slope": slope_dst, "inter": inter_dst,
                                      "r_val": r_val_dst, "p_val": p_val_dst,
-                                     "std_err": std_err_dst, "slope_lcl": confidence_interval[0],
+                                     "std_err": std_err_dst, "DTS_yr": DTS_yr,
+                                     "ESS": ESS,
+                                     "slope_lcl": confidence_interval[0],
                                      "slope_ucl": confidence_interval[1]}})
             print("Slope from LR for season ", key, ": ", str(slope_dst), " lcl:", str(confidence_interval[0]),
                   " ucl:", str(confidence_interval[1]), " pval (DST):", str(p_val_dst))
@@ -78,13 +105,13 @@ def do_summary_stats(slopes, slope_method, dat_ts, dat, dat_timenumeric, dat_sea
     # purpose: generate a dictionary of summary stats using detrended anomalies (seasonal and annual)
     #          meant to help with understanding how best to test for trend and significance
     # input:
-    #     slopes          - dictionary of slopes
-    #     slope_method    - "SS" (Theil-Sen) or "LR" (linear regression)
-    #     dat_ts          - data time scale (24, 12, 4, 1)
-    #     dat             - xr array of data, annual, with one variable
-    #     dat_timenumeric      - list of dates, annual, timedelta
-    #     dat_seas             - list of data arrays for each season
-    #     dat_timenumeric_seas - list of dates for each season, timedelta
+    #     slopes               - list; list of dictionary elements containing slopes
+    #     slope_method         - string; "SS" (Theil-Sen) or "LR" (linear regression)
+    #     dat_ts               - integer; data time scale - number of seasons per year (24, 12, 4, 1)
+    #     dat                  - dataArray; xr DataArray of data, annual, with one variable
+    #     dat_timenumeric      - dataArray; list of dates, annual, timedelta
+    #     dat_seas             - list; list of xr DataArrays for each season
+    #     dat_timenumeric_seas - list; list of xr Datarrays with numeric dates for each season, timedelta
     # returns:
     #     summary_stats_all    - dictionary with a slew of exploratory test results
 
@@ -113,14 +140,19 @@ def do_summary_stats(slopes, slope_method, dat_ts, dat, dat_timenumeric, dat_sea
             # else
             # to do - different time and time mult if lr
 
-            stat_sw, p_value_sw = stats.shapiro(residuals)  # test for normality
+            stat_sw, p_value_sw = stats.shapiro(residuals)  # test for normality (small p val = small prob of normal)
             _, p_value_whites, _, _ = het_white(residuals, exog=add_constant(dat_1seas_timenum))  # test for skew
             _, p_value_goldfield, _ = het_goldfeldquandt(residuals, add_constant(dat_1seas_timenum))  # test for skew
             # test periodicity using fft
             freq, power_spec = do_fft(residuals, len(residuals))
             peak_indices = np.argsort(power_spec)[::-1][:5]  # Top 5 peaks
             peak_frequencies = np.abs(freq[peak_indices])  # corresponding frequencies
-            peak_freq_period_yrs = 1 / peak_frequencies * 1 / dat_ts
+
+            if key == "all seasons":
+                peak_freq_period_yrs = 1 / peak_frequencies * 1 / dat_ts
+            else:
+                peak_freq_period_yrs = 1 / peak_frequencies
+
             # autocorrelation
             nlags = len(residuals - 1)
             acf_values = acf(residuals.values, adjusted=True, fft=False, alpha=alpha_acf, nlags=nlags,
@@ -200,7 +232,7 @@ def do_lr_seasons(dat, dat_seas, dat_time, dat_time_seas, seas_per_yr):
         d1 = dat_time_seas[season]
         dmult = dat_seas[season]
         slope, inter, rval, pval, stderr = linregress(d1, dmult.values)
-        LR_slopes.append({"season "+str(season+1): {"slope": slope, "inter": inter,
+        LR_slopes.append({"season "+str(season+1): {"slope": slope * 365, "inter": inter * 365,
                           "rval": rval, "pval": pval, "stderr": stderr}})
 
     slope, inter, rval, pval, _ = linregress(dat_time.values, dat.values)
