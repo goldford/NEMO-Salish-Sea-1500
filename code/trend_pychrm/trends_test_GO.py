@@ -149,16 +149,22 @@ print(table)
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 dat_f = 'RUN216mod_anom_temp_1980-2018.nc'
-dat = xr.open_dataset(os.path.join(dat_p,dat_f))
-dat = dat[var]
-mod_davg = depth_int(dat, depth_min, depth_max, gdept_0, e3t0)
-if remove_nans:
-    #nan_mask = np.logical_or(np.isnan(dat_davg), np.isnan(time_numeric))
-    nan_mask = np.isnan(mod_davg)
-    mod_davg = mod_davg[~nan_mask]
-ax.fill_between(time_datetime_obs_nonan2, dat_davg, mod_davg, color='grey', label='', alpha=0.7, zorder=0)
-plt.title("Run WITH Bias Correction, Depths " + str(depth_min) + " to " + str(depth_max) + " m")
+mod = xr.open_dataset(os.path.join(dat_p,dat_f))
+mod = mod[var]
+mod_davg = depth_int(mod, depth_min, depth_max, gdept_0, e3t0)
+mod_davg = mod_davg[~nan_mask]
+
+fig, ax = plt.subplots()
+ax.fill_between(dat_pytime, dat_davg, mod_davg, color='grey', label='', alpha=0.7, zorder=0)
+#ax.scatter(dat_pytime, dat_davg, label='Obs', s=1, color='r', marker='o')
+#ax.scatter(dat_pytime, mod_davg, label='Mod', s=1, color='g', marker='x')
+ax.plot(dat_pytime, dat_davg, label='Obs', color='r', linestyle='-', linewidth=1)
+ax.plot(dat_pytime, mod_davg, label='Mod', color='g', linestyle='--', linewidth=1)
+ax.xaxis.set_major_locator(mdates.YearLocator())
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+ax.set_ylim(-1,1)
+plt.title("HOTSS v1.02 Modelled vs. Observed Temperature Anomalies at Nanoose Stn, " + str(depth_min) + " to " + str(depth_max) + " m")
 plt.xlabel('Time')
-plt.ylabel('Temperature Anomaly')
+plt.ylabel('Anomaly (deg C)')
 plt.legend()
 plt.show()
