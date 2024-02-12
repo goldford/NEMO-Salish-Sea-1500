@@ -14,6 +14,118 @@ from linregress_GO import linregress_GO
 from statsmodels.stats.diagnostic import het_goldfeldquandt, het_white
 from statsmodels.tools.tools import add_constant
 from statsmodels.tsa.stattools import acf
+import datetime as dt
+import csv
+
+def write_mk3pw_data_to_csv(data, model_obs_name, csv_filename):
+    # Define the fieldnames for the CSV
+    fieldnames = ['model-obs-name', 'test', 'season', 'p', 'ss', 'slope', 'lcl', 'ucl']
+
+    # Open the CSV file in write mode
+    with open(csv_filename, mode='w', newline='') as csv_file:
+        # Create a CSV DictWriter object
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+
+        # Write the header row
+        writer.writeheader()
+
+        # Iterate over each season in the data
+        for season_num, season_data in enumerate(data, start=1):
+            # Iterate over each item in the season's dictionary
+            for season_name, season_values in season_data.items():
+                if "all seasons" in season_name:
+                    for season_name2, s_vals2 in season_values.items():
+                        writer.writerow({
+                            'model-obs-name': model_obs_name,
+                            'test': 'mann kendall 3pw ' + season_name,
+                            'season': 'season-' + str(season_name2),
+                            'p': s_vals2['p'],
+                            'ss': s_vals2['ss'],
+                            'slope': s_vals2['slope'],
+                            'lcl': s_vals2['lcl'],
+                            'ucl': s_vals2['ucl']
+                        })
+                else:
+                    # Write the data to the CSV row
+                    if len(season_values) < 3:
+                        season_values = season_values[0]
+                    writer.writerow({
+                        'model-obs-name': model_obs_name,
+                        'test': 'mann-kendall 3pw',
+                        'season': season_name,
+                        'p': season_values['p'],
+                        'ss': season_values['ss'],
+                        'slope': season_values['slope'],
+                        'lcl': season_values['lcl'],
+                        'ucl': season_values['ucl']
+                    })
+
+
+def get_dat(meshm_p, meshm_f, dat_p, dat_f, var, time_inc, use_abs=False, dep_int=True, depth_min=0, depth_max=0, yr_st=0, yr_en=0):
+    # this could be merged with depth_int function
+    # GO - 2024
+
+    # inputs:
+    #    meshm_p     - string; path to mesh mask from NEMO which contains depths and coords
+    #    meshm_f     - string; mesh mask file name
+    #    dat_f       - string; netcdf data file of observations, assumed biweekly and spatially averaged (dims: depth, time)
+    #    depth_min   - float; minimum depth to use (during depth integration)
+    #    depth_max   - float; maximum depth to use (during depth integration)
+    #    var         - string; the variable being analysed (e.g., "temperature") - only tested with temp for now
+
+    # returns:
+    #   dat_davg             -
+    #   dat_pytime           -
+    #   dat_numerictime      -
+
+    # ==== Load Data ====
+    dat = xr.open_dataset(os.path.join(dat_p, dat_f))
+    dat = dat[var]
+
+    # truncate by year
+    if yr_en != 0:
+        start_date = str(yr_st) + '-01-01'
+        end_date = str(yr_en) + '-12-31'
+        dat = dat.sel(time_counter=slice(start_date, end_date))
+
+
+    # ==== Depth integration ====
+    if dep_int:
+        tmask, gdept_0, e3t0 = get_meshmask(meshm_p, meshm_f)
+        dat_davg = depth_int(dat, depth_min, depth_max, gdept_0, e3t0)
+        dat = dat_davg
+
+    # using abs vals yields variability in anoms instead of directional
+    if use_abs:
+        dat = np.abs(dat)
+
+
+
+    # ==== Time Averaging ====
+    print("Using ", time_inc, " avg")
+    if time_inc == 'annual': seasons_per_year = 1
+    elif time_inc == 'seasonal': seasons_per_year = 4
+    elif time_inc == 'monthly': seasons_per_year = 12
+    elif time_inc == 'biweekly': seasons_per_year = 24
+    dat, dat_ts, time_dim = do_seasonal_avg(dat,time_inc)
+
+    # ==== Deal with time, datetime, etc ====
+    start_date = dat[time_dim].values[0]
+    #  assumes 'time_counter' is in datetime64 format
+    dat_numerictime = (dat[time_dim] - start_date) / np.timedelta64(1, 'D')
+    time_datetime64 = np.array(dat[time_dim], dtype='datetime64[s]')
+    #  painful to convert to py datetime but is required for mk
+    dat_pytime = np.array([dt.datetime(year, month, day) for year, month, day in zip(dat[time_dim].dt.year.values,
+                                                                                     dat[time_dim].dt.month.values,
+                                                                                     dat[time_dim].dt.day.values)])
+    # split seasons
+    dat_seas, dat_pytime_seas, dat_timenumeric_seas = prep_data_seas(dat, dat_pytime, dat_numerictime,
+                                                                     seasons_per_year, time_dim)
+
+    return (dat, dat_pytime, dat_numerictime, dat_seas,
+            dat_pytime_seas, dat_timenumeric_seas,
+            dat_ts, time_dim, seasons_per_year)
+
 
 def mk3pw_trend_sig(seasons_per_year, resolution, alpha_mk, dat, dat_pytime, dat_seas, dat_pytime_seas):
     #created Jan 2024 by G Oldford
@@ -36,13 +148,17 @@ def mk3pw_trend_sig(seasons_per_year, resolution, alpha_mk, dat, dat_pytime, dat
         out = mk.mk_temp_aggr(dat_pytime, np.asarray(dat), resolution, alpha_mk=alpha_mk)
         mk_3pw_out.append({"season " + str(1): out})
     else:
-        print("Seasons analysed individually:")
+        print("Seasons analysed individually (3PW):")
         for season in range(1, seasons_per_year + 1):
             out = mk.mk_temp_aggr([dat_pytime_seas[season - 1]], [dat_seas[season - 1]],
                                   resolution, alpha_mk=alpha_mk)
             mk_3pw_out.append({"season " + str(season): out[0]})
+        print("Seasons analysed together, still using 'seasonal' mk (3PW):")
         out = mk.mk_temp_aggr(dat_pytime_seas, dat_seas, resolution)
-        mk_3pw_out.append({"all seasons": out})
+        mk_3pw_out.append({"all seasons, seasonal mk": out})
+        print("Seasons analysed together, NOT using 'seasonal' mk (3PW):")
+        out = mk.mk_temp_aggr(dat_pytime, np.asarray(dat), resolution)
+        mk_3pw_out.append({"all seasons, nonseasonal mk": out})
     return mk_3pw_out
 
 def dst_trend_sig(summary_stats_all, dat_ts, alpha, dat, dat_seas, dat_numerictime, dat_numerictime_seas):
@@ -68,6 +184,9 @@ def dst_trend_sig(summary_stats_all, dat_ts, alpha, dat, dat_seas, dat_numericti
                 ESS = len(dat) / DTS  # effective sample size
                 dat_np = np.asarray(dat.values)
                 dat_ntime = dat_numerictime
+                nan_mask = np.isnan(dat_np)
+                dat_np = dat_np[~nan_mask]
+                dat_ntime = dat_ntime[~nan_mask]
                 DTS_yr = DTS / dat_ts
 
             else:
@@ -77,6 +196,9 @@ def dst_trend_sig(summary_stats_all, dat_ts, alpha, dat, dat_seas, dat_numericti
                         ESS = len(dat_seas[i]) / DTS
                         dat_np = np.asarray(dat_seas[i].values)
                         dat_ntime = dat_numerictime_seas[i]
+                        nan_mask = np.isnan(dat_np)
+                        dat_np = dat_np[~nan_mask]
+                        dat_ntime = dat_ntime[~nan_mask]
                         DTS_yr = DTS
                     i += 1
             print("The Decorrelation Time Scale (DTS; units: yr): ", DTS_yr)
@@ -135,14 +257,21 @@ def do_summary_stats(slopes, slope_method, dat_ts, dat, dat_timenumeric, dat_sea
                 dat_1seas = dat_seas[seas]
                 dat_1seas_timenum = dat_timenumeric_seas[seas]
 
+            nan_mask = np.isnan(dat_1seas)
+            dat_1seas = dat_1seas[~nan_mask]
+            dat_1seas_timenum = dat_1seas_timenum[~nan_mask]
+
             if slope_method == "SS":
-                residuals = dat_1seas - (slope * (dat_timenumeric / 365) + inter)
+                # hmmmmmmm
+                residuals = dat_1seas - (slope * (dat_1seas_timenum / 365) + inter)
             # else
             # to do - different time and time mult if lr
 
             stat_sw, p_value_sw = stats.shapiro(residuals)  # test for normality (small p val = small prob of normal)
-            _, p_value_whites, _, _ = het_white(residuals, exog=add_constant(dat_1seas_timenum))  # test for skew
-            _, p_value_goldfield, _ = het_goldfeldquandt(residuals, add_constant(dat_1seas_timenum))  # test for skew
+            _, p_value_whites, _, _ = het_white(residuals, exog=add_constant(dat_1seas_timenum))  # test for heterosk
+            _, p_value_goldfield, _ = het_goldfeldquandt(residuals, add_constant(dat_1seas_timenum))  # test for heterosk
+            # note that low p-vals in Het-White and Goldfeld-Quandt tests suggests evidence against homoscedasticity
+
             # test periodicity using fft
             freq, power_spec = do_fft(residuals, len(residuals))
             peak_indices = np.argsort(power_spec)[::-1][:5]  # Top 5 peaks
@@ -155,9 +284,12 @@ def do_summary_stats(slopes, slope_method, dat_ts, dat, dat_timenumeric, dat_sea
 
             # autocorrelation
             nlags = len(residuals - 1)
-            acf_values = acf(residuals.values, adjusted=True, fft=False, alpha=alpha_acf, nlags=nlags,
+            acf_values = acf(residuals.values, adjusted=True, qstat=True, fft=False, alpha=alpha_acf, nlags=nlags,
                              missing="conservative")
             AR1_coef = acf_values[0][1]
+            AR1_confint= acf_values[1]
+            AR1_qstat = acf_values[2]
+            AR1_pval = acf_values[3] # low means unlikely random (thus autocorr)
 
             summary_stats_all.append({key: {"norm-shapiro-wilks stat": stat_sw,
                                     "norm-shapiro-wilks pval": p_value_sw,
@@ -167,6 +299,9 @@ def do_summary_stats(slopes, slope_method, dat_ts, dat, dat_timenumeric, dat_sea
                                     "fft-freq": freq,
                                     "fft-power-spec": power_spec,
                                     "acf-ar1-coeff": AR1_coef,
+                                    "acf-qstat": AR1_qstat,
+                                    "acf-pvals": AR1_pval,
+                                    "acf-pval1": AR1_pval[0],
                                     "acf-all-nlag-coeffs": acf_values
                                     }
                               })
@@ -174,7 +309,6 @@ def do_summary_stats(slopes, slope_method, dat_ts, dat, dat_timenumeric, dat_sea
 
 def prep_data_seas(dat, dat_pytime, dat_numerictime, seasons_per_yr, time_nm):
     # created by G Oldford Jan 2024
-    # does lin regression for data grouped by season and annually
     # inputs
     #   dat             - depth averaged data in xarray with one variable
     #   dat_pytime      - time as python datetime
@@ -213,7 +347,12 @@ def prep_data_seas(dat, dat_pytime, dat_numerictime, seasons_per_yr, time_nm):
                 indices = np.where(dat['season'] == season_name)
             seasonal_dates.append((dat_pytime[indices]))
             seasonal_dates_numeric.append((dat_numerictime[indices]))
-            dat_seas.append((dat[indices]))
+            # catch for if it's not depth-averaged
+            if len(dat.shape)==1:
+                dat_seas.append((dat[indices]))
+            else:
+                shape = dat.shape
+                dat_seas.append((dat[:,indices[0]]))
 
     return dat_seas, seasonal_dates, seasonal_dates_numeric
 
@@ -229,12 +368,16 @@ def do_lr_seasons(dat, dat_seas, dat_time, dat_time_seas, seas_per_yr):
     #   LR_slopes     - a list of dictionary elements
     LR_slopes = []
     for season in range(0, seas_per_yr):
-        d1 = dat_time_seas[season]
-        dmult = dat_seas[season]
+        nan_mask = np.isnan(dat_seas[season])
+        dmult = dat_seas[season][~nan_mask]
+        d1 = dat_time_seas[season][~nan_mask]
         slope, inter, rval, pval, stderr = linregress(d1, dmult.values)
         LR_slopes.append({"season "+str(season+1): {"slope": slope * 365, "inter": inter * 365,
                           "rval": rval, "pval": pval, "stderr": stderr}})
 
+    nan_mask = np.isnan(dat)
+    dat = dat[~nan_mask]
+    dat_time = dat_time[~nan_mask]
     slope, inter, rval, pval, _ = linregress(dat_time.values, dat.values)
     slope = slope * 365  # returns slope in /day (the units of time_numeric
     inter = inter * 365  # returns slope in /day (the units of time_numeric
@@ -242,7 +385,7 @@ def do_lr_seasons(dat, dat_seas, dat_time, dat_time_seas, seas_per_yr):
                                       "rval": rval, "pval": pval, "stderr": stderr}})
     return LR_slopes
 
-def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, resolution):
+def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, resolution, alpha_mk=95):
     # created by G Oldford Jan 2024
     # calling mks.sens_slope is not usually called directly, so this code was borrowed from mannkendall lib
     # Intercept calculated using Conover, W.J. (1980) method (from pymannkendall)
@@ -257,28 +400,116 @@ def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, re
     # returns
     #   list of dictionary elements, slope and upper conf. limit, lower conf, intercept - both annual and seasonal
     #
-    #  note all slopes are converted to units of years but sen_slope returns units of seconds
+    #  note all slopes are converted to units of years, sen_slope returns units of seconds
 
     SS_slopes = []
     alpha_cl = 90
 
     for season in range(0, seasons_per_yr):
-        dat_davg_np = np.asarray(dat_seas[season])
-        t = mk.mkt.nb_tie(dat_davg_np, resolution)
-        (s, n) = mk.mks.s_test(dat_davg_np, dat_pytime_seas[season])
-        k_var = mk.mkt.kendall_var(dat_davg_np, t, n)
-        z = mk.mks.std_normal_var(s, k_var)
-        mk_out = mk.mks.sen_slope(dat_pytime_seas[season], dat_davg_np, k_var, alpha_cl=alpha_cl)  # units of second!
-        mult = 3600 * 24 * 365.25
-        slope_yr = mk_out[0] * mult
-        slope_yr_min = mk_out[1] * mult
-        slope_yr_max = mk_out[2] * mult
-        inter_yr = np.nanmedian(dat_davg_np) - np.median(
-            np.arange(len(dat_davg_np))[~np.isnan(dat_davg_np.flatten())]) * slope_yr
-        SS_slopes.append({"season " + str(season+1): {"slope": slope_yr,
-                                                      "slope_LCL": slope_yr_min,
-                                                      "slope_UCL": slope_yr_max,
-                                                      "inter":inter_yr}})
+        # if it is depth integrated
+        if len(dat_seas[season].shape) == 1:
+            dat_davg_np = np.asarray(dat_seas[season])
+            # this returns annualised slopes using the pyttime
+            result, s, vari, z = mk.compute_mk_stat(dat_pytime_seas[season], dat_davg_np, resolution,
+                                                    alpha_mk=alpha_mk, alpha_cl=alpha_cl)
+            inter_yr = np.nanmedian(dat_davg_np) - np.median(
+                np.arange(len(dat_davg_np))[~np.isnan(dat_davg_np.flatten())]) * result['slope']
+            SS_slopes.append({"season " + str(season + 1): {"slope": result['slope'],
+                                                            "lcl": result['lcl'],
+                                                            "ucl": result['ucl'],
+                                                            "p": result['p'],
+                                                            "ss": result['ss'],
+                                                            "inter": inter_yr}})
+        else: # not dep integrated
+            dat_se_np = np.asarray(dat_seas[season])
+            for d_idx in range(dat_se_np.shape[0]):
+                depth_data = dat_se_np[d_idx,:]
+                if np.isnan(depth_data).all():
+                    continue
+                result, s, vari, z = mk.compute_mk_stat(dat_pytime_seas[season], depth_data, resolution,
+                                                        alpha_mk=alpha_mk, alpha_cl=alpha_cl)
+                inter_yr = np.nanmedian(depth_data) - np.median(
+                    np.arange(len(depth_data))[~np.isnan(depth_data.flatten())]) * result['slope']
+
+                SS_slopes.append({"season " + str(season + 1): {"depth idx" + str(d_idx):
+                                                                    {"depth idx": d_idx,
+                                                                     "slope": result['slope'],
+                                                                     "lcl": result['lcl'],
+                                                                     "ucl": result['ucl'],
+                                                                     "p": result['p'],
+                                                                     "ss": result['ss'],
+                                                                     "inter": inter_yr}}})
+
+
+    # catch if not depth integrated
+    if len(dat_seas[season].shape) == 1:
+        dat_davg_np = np.asarray(dat)
+        result, s, vari, z = mk.compute_mk_stat(dat_pytime, dat_davg_np, resolution,
+                                                alpha_mk=alpha_mk, alpha_cl=alpha_cl)
+        inter_yr = np.nanmedian(dat_davg_np) - np.median(np.arange(len(dat_davg_np))[~np.isnan(dat_davg_np.flatten())]) * \
+                   result['slope']
+        SS_slopes.append({"all seasons": {"slope": result['slope'],
+                                           "lcl": result['lcl'],
+                                           "ucl": result['ucl'],
+                                           "p": result['p'],
+                                           "ss": result['ss'],
+                                           "inter": inter_yr}})
+    else:
+        for d_idx in range(dat.shape[0]):
+            depth_data = np.asarray(dat[d_idx,:])
+            if np.isnan(depth_data).all():
+                continue
+            result, s, vari, z = mk.compute_mk_stat(dat_pytime, depth_data, resolution,
+                                                    alpha_mk=alpha_mk, alpha_cl=alpha_cl)
+            inter_yr = np.nanmedian(depth_data) - np.median(
+                np.arange(len(depth_data))[~np.isnan(depth_data.flatten())]) * result['slope']
+            SS_slopes.append({"all seasons": {"depth idx" + str(d_idx):
+                                                  {"depth idx": d_idx,
+                                                   "slope": result['slope'],
+                                                   "lcl": result['lcl'],
+                                                   "ucl": result['ucl'],
+                                                   "p": result['p'],
+                                                   "ss": result['ss'],
+                                                   "inter": inter_yr}}})
+
+
+
+    # alt way with more detail
+    # t = mk.mkt.nb_tie(dat_davg_np, resolution)
+    # (s, n) = mk.mks.s_test(dat_davg_np, dat_pytime)
+    # k_var = mk.mkt.kendall_var(dat_davg_np, t, n)
+    # z = mk.mks.std_normal_var(s, k_var)
+    # mk_out = mk.mks.sen_slope(dat_pytime, dat_davg_np,k_var,alpha_cl=alpha_cl) # units of second!
+    # mult = 3600 * 24 * 365.25
+    # slope_yr = mk_out[0] * mult; slope_yr_min = mk_out[1] * mult; slope_yr_max = mk_out[2] * mult
+    # inter_yr = np.nanmedian(dat_davg_np) - np.median(np.arange(len(dat_davg_np))[~np.isnan(dat_davg_np.flatten())]) * slope_yr
+    # # or median(x) - (n-1)/2 *slope
+    # SS_slopes.append({"all seasons": {"slope": slope_yr,
+    #                                   "slope_LCL": slope_yr_min,
+    #                                   "slope_UCL": slope_yr_max,
+    #                                   "inter":inter_yr}})
+
+
+    return SS_slopes
+
+def do_ss(dat, dat_pytime, resolution):
+    # created by G Oldford Jan 2024
+    # calling mks.sens_slope is not usually called directly in mk lib,
+    # so this code was borrowed from mannkendall lib
+    # Intercept calculated using Conover, W.J. (1980) method (from pymannkendall)
+    #
+    # inputs
+    #   dat              - depth-averaged xarray with one variable and time dimension
+    #   dat_pytime       - xarray or numpy array, the time counter var from dat_davg as py datetime, required by mk
+    #   resolution       - the precision of the measurements, significant digits
+    # returns
+    #   list of dictionary elements, slope and upper conf. limit, lower conf, intercept - annual
+    #
+    #  note all slopes are converted to units of years but sen_slope returns units of seconds
+
+    SS_slopes = []
+    alpha_cl = 90
+
     dat_davg_np = np.asarray(dat)
     t = mk.mkt.nb_tie(dat_davg_np, resolution)
     (s, n) = mk.mks.s_test(dat_davg_np, dat_pytime)
@@ -289,7 +520,7 @@ def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, re
     slope_yr = mk_out[0] * mult; slope_yr_min = mk_out[1] * mult; slope_yr_max = mk_out[2] * mult
     inter_yr = np.nanmedian(dat_davg_np) - np.median(np.arange(len(dat_davg_np))[~np.isnan(dat_davg_np.flatten())]) * slope_yr
     # or median(x) - (n-1)/2 *slope
-    SS_slopes.append({"all seasons": {"slope": slope_yr,
+    SS_slopes.append({"annual": {"slope": slope_yr,
                                       "slope_LCL": slope_yr_min,
                                       "slope_UCL": slope_yr_max,
                                       "inter":inter_yr}})
