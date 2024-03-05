@@ -281,6 +281,7 @@ plt.title("HOTSSea v1.02 Modelled vs. Observed Temperature Anomalies at Nanoose 
 plt.ylabel('Anomaly (deg C)')
 plt.legend()
 plt.savefig('modvobs_nanoose_' + time_inc + '.png', dpi=300)
+plt.savefig('modvobs_nanoose_' + time_inc + '.eps', dpi=300)
 plt.show()
 
 
