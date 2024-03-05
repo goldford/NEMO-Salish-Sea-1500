@@ -15,6 +15,7 @@ meshm_p = '../../data/mesh mask/'
 meshm_f = 'mesh_mask_20210406.nc'
 dat_p = '../climatol_intermediate_files/'
 
+# to-do: this does not currently do much - just selects files below
 year_min = 1980
 year_max = 2018
 
@@ -160,10 +161,18 @@ SS_slopes_o = SS_slopes
 ############################################################
 ############################################################
 # REPEAT for model
-# should reduce this repetition in future
+# should revise to reduce this repetition
+#yr_st=0 # set to zero for default
+#yr_en=0
+#(d_m, d_pt_m, d_tn_m,
+# d_se_m, d_pt_se_m, d_tn_se_m, _, _, _) = get_dat(meshm_p, meshm_f, dat_p, dat_f_obs, var,
+#                                                     time_inc, use_abs, dep_int=False, yr_st=yr_st, yr_en=yr_en)
+yr_st=0
+yr_en=0
 (d_m, d_pt_m, d_tn_m,
  d_se_m, d_pt_se_m, d_tn_se_m, _, _, _) = get_dat(meshm_p, meshm_f, dat_p, dat_f_mod2, var,
-                                                     time_inc, use_abs, dep_int=False)
+                                                      time_inc, use_abs, dep_int=False, yr_st=yr_st, yr_en=yr_en)
+
 # slopes
 SS_slopes = do_ss_seasons(d_m, d_se_m, d_pt_m, d_pt_se_m, seasons_per_year, resolution, alpha_MK)
 # test for autocorr in slope residuals
@@ -277,9 +286,11 @@ SS_slopes_m = SS_slopes
 
 
 # plot over depths
-season_names = ['season 1', 'season 2', 'season 3', 'season 4', 'all seasons']
+season_names = ['season 1', 'season 2', 'season 3', 'season 4', 'inter-seasonal'] # 'all seasons' is not good to use
 season_labels = ['Winter', 'Spring', 'Summer', 'Fall', 'Annual']
-fig, axs = plt.subplots(1, len(season_names), figsize=(7.5, 3.5), sharey=True)
+letters = ['(a)','(b)','(c)','(d)','(e)']
+fig, axs = plt.subplots(1, len(season_names), figsize=(7, 3.5), sharey=True)
+log_on = True
 
 for i, season_name in enumerate(season_names):
 
@@ -327,9 +338,17 @@ for i, season_name in enumerate(season_names):
     # Plotting
     lbl='Obs.'
     clr = 'k'
-    axs[i].plot(trends, depths, label=lbl, color=clr, linewidth=1.5)
-    axs[i].plot(ucls, depths, linestyle='--', label='', color=clr, linewidth=1)
-    axs[i].plot(lcls, depths, linestyle='--', label='', color=clr, linewidth=1)
+    #lbl = '1980 - 2018'
+    #clr = 'k'
+    if log_on:
+        trends = trends[:]
+        depths = depths[:]
+        ucls = ucls[:]
+        lcls = lcls[:]
+    axs[i].plot(trends, depths, label=lbl, color=clr, linewidth=1.2)
+    #axs[i].plot(ucls, depths, linestyle='--', label='', color=clr, linewidth=1)
+    #axs[i].plot(lcls, depths, linestyle='--', label='', color=clr, linewidth=1)
+    axs[i].fill_betweenx(depths, ucls, lcls, color=clr, alpha=0.2, linewidth=0)
 
     #########################################################
     #########################################################
@@ -368,27 +387,64 @@ for i, season_name in enumerate(season_names):
 
     # Plotting
     clr = 'r'
-    lbl = 'Mod.'
-    axs[i].plot(trends, depths, label=lbl, color=clr, linewidth=1.5)
-    axs[i].plot(ucls, depths, linestyle='--', label='', color=clr, linewidth=1)
-    axs[i].plot(lcls, depths, linestyle='--', label='', color=clr, linewidth=1)
+    lbl = 'HOTSSea'
+    # clr = 'grey'
+    # lbl = '1970 - 1990'
+    if log_on:
+        trends = trends[:]
+        depths = depths[:]
+        ucls = ucls[:]
+        lcls = lcls[:]
+    axs[i].plot(trends, depths, label=lbl, color=clr, linewidth=1.2)
+    #axs[i].plot(ucls, depths, linestyle='--', label='', color=clr, linewidth=1)
+    #axs[i].plot(lcls, depths, linestyle='--', label='', color=clr, linewidth=1)
+    axs[i].fill_betweenx(depths, ucls, lcls, color=clr, alpha=0.2, linewidth=0)
 
-    axs[i].set_xlim(-0.25, 0.25)
+    # if 1975 - 1985
+    #xl_min = -1
+    #xl_max = 2.5
+    # if 1970 - 2018
+    #xl_min = -0.5
+    #xl_max = 1.25
+    # if mod obs
+    xl_min = -0.25
+    xl_max = 0.6
+    axs[i].set_xlim(xl_min, xl_max)
+    #axs[i].set_ylim(1, max(depths))
+
+    #axs[i].set_xticks(np.arange(xl_min, xl_max, 0.5)) # if 1975 - 1985
+    axs[i].set_xticks(np.arange(xl_min, 0.75, 0.25))
+
     axs[i].set_title(f'{season_label}', fontsize=8.5)
-    axs[i].tick_params(axis='both', which='major', labelsize=7)
+    axs[i].tick_params(axis='both', which='major', labelsize=6)
+
+    letter = letters[i]
+    axs[i].text(0.1, 1.03, letter, transform=axs[i].transAxes, ha='center', color='k', fontsize=9)
+
+    if log_on:
+        axs[i].set_yscale("log")
+
     if i == 0:
         axs[i].set_ylabel('Depth (m)', fontsize=8)
     if i == 2:
         axs[i].set_xlabel('Temp. Anom. Trend (\u00B0C) / decade)', fontsize=8)
-    if i == 4:
-        axs[i].legend(fontsize=7)
+    if not log_on and i == 2:
+        axs[i].legend(fontsize=6, loc='lower right')
+    elif i == 2:
+        axs[i].legend(fontsize=6, loc='lower right')
+
     axs[i].invert_yaxis()  # Invert y-axis to have depths increasing downwards
+
     axs[i].grid(color='lightgrey')
+    axs[i].axvline(x=0, color='black', linestyle='--', linewidth='0.5')
 
 
 plt.tight_layout()
 
-plt.savefig('trend_eachdep_nanoose_modobs.png', dpi=300)
+# plt.savefig('trend_alldep_nanoose_modobs_wletters.png', dpi=300)
+plt.savefig('trend_alldep_nanoose_obs_twoperiods_' +
+            str(year_min) + '-' + str(year_max) + '.png',
+            dpi=300)
 plt.show()
 
 

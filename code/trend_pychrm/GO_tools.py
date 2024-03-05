@@ -8,6 +8,7 @@ from scipy.fft import fft, ifft
 import xarray as xr
 import pandas as pd
 import mannkendall as mk
+import pymannkendall as pymk
 from scipy import stats
 from scipy.stats import linregress
 from linregress_GO import linregress_GO
@@ -16,6 +17,66 @@ from statsmodels.tools.tools import add_constant
 from statsmodels.tsa.stattools import acf
 import datetime as dt
 import csv
+from scipy.interpolate import interp1d
+from scipy.stats import norm
+
+# this is for manually computing Theil-Sen or Sen's Slope
+# from here https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.mstats.sen_seasonal_slopes.html
+def dijk(yi):
+    n = len(yi)
+    x = np.arange(n)
+    dy = yi - yi[:, np.newaxis]
+    dx = x - x[:, np.newaxis]
+    # we only want unique pairs of distinct indices
+    mask = np.triu(np.ones((n, n), dtype=bool), k=1)
+    return dy[mask] / dx[mask]
+
+
+# vectorization approach to calculate mk score, S
+# (function from pymannkendall)
+# See Gilbert 1987 p. 227
+def __mk_score(x, n):
+    s = 0
+
+    demo = np.ones(n)
+    for k in range(n - 1):
+        s = s + np.sum(demo[k + 1:n][x[k + 1:n] > x[k]]) - np.sum(demo[k + 1:n][x[k + 1:n] < x[k]])
+
+    return s
+
+# original Mann-Kendal's variance S calculation
+# (function from pymannkendall)
+def __variance_s(x, n):
+    # calculate the unique data
+    unique_x = np.unique(x)
+    g = len(unique_x)
+
+    # calculate the var(s)
+    if n == g:  # there is no tie
+        var_s = (n * (n - 1) * (2 * n + 5)) / 18
+
+    else:  # there are some ties in data
+        tp = np.zeros(unique_x.shape)
+        demo = np.ones(n)
+
+        for i in range(g):
+            tp[i] = np.sum(demo[x == unique_x[i]])
+
+        var_s = (n * (n - 1) * (2 * n + 5) - np.sum(tp * (tp - 1) * (2 * tp + 5))) / 18
+
+    return var_s
+
+# standardized test statistic Z
+def __z_score(s, var_s):
+    if s > 0:
+        z = (s - 1) / np.sqrt(var_s)
+    elif s == 0:
+        z = 0
+    elif s < 0:
+        z = (s + 1) / np.sqrt(var_s)
+
+    return z
+
 
 def write_mk3pw_data_to_csv(data, model_obs_name, csv_filename):
     # Define the fieldnames for the CSV
@@ -387,7 +448,7 @@ def do_lr_seasons(dat, dat_seas, dat_time, dat_time_seas, seas_per_yr):
 
 def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, resolution, alpha_mk=95):
     # created by G Oldford Jan 2024
-    # calling mks.sens_slope is not usually called directly, so this code was borrowed from mannkendall lib
+    # calling mks.sens_slope is not usually called directly in the mk lib, so this code was borrowed from mk lib
     # Intercept calculated using Conover, W.J. (1980) method (from pymannkendall)
     #
     # inputs
@@ -401,10 +462,13 @@ def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, re
     #   list of dictionary elements, slope and upper conf. limit, lower conf, intercept - both annual and seasonal
     #
     #  note all slopes are converted to units of years, sen_slope returns units of seconds
+    # to-do: it may be better here to just use scipy stats instead, not the mk lib which is aimed at prewhitening
+    #        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.mstats.sen_seasonal_slopes.html
 
     SS_slopes = []
     alpha_cl = 90
 
+    # analyze all seasons individually
     for season in range(0, seasons_per_yr):
         # if it is depth integrated
         if len(dat_seas[season].shape) == 1:
@@ -431,18 +495,119 @@ def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, re
                 inter_yr = np.nanmedian(depth_data) - np.median(
                     np.arange(len(depth_data))[~np.isnan(depth_data.flatten())]) * result['slope']
 
+                # alt way - experimental - for conf int
+                trend, h, p, z, Tau, s_se, var_s_se, slope, intercept = pymk.original_test(depth_data)
+                se_slopes = dijk(depth_data)
+                se_slopes.sort()
+                z_tot = (s_se - np.sign(s_se)) / var_s_se ** 0.5
+                p = 2 * (1 - norm.cdf(np.abs(z_tot), loc=0, scale=1))
+                if p <= 1 - alpha_mk / 100:
+                    ss = alpha_mk
+                else:
+                    ss = 0
+                # bit from mk_stats.py in mannkendall lib
+                # Apply the confidence limits
+                cconf = -norm.ppf((1 - alpha_cl / 100) / 2) * var_s_se ** 0.5
+                # Note: because python starts at 0 and not 1, we need an additional "-1" to the following
+                # values of m_1 and m_2 to match the matlab implementation.
+                m_1 = (0.5 * (len(se_slopes) - cconf)) - 1
+                m_2 = (0.5 * (len(se_slopes) + cconf)) - 1
+
+                # Let's setup a quick interpolation scheme to get the best possible confidence limits
+                f = interp1d(np.arange(0, len(se_slopes), 1), se_slopes, kind='linear',
+                             fill_value=(se_slopes[0], se_slopes[-1]), assume_sorted=True, bounds_error=False)
+                lcl = f(m_1)
+                ucl = f(m_2)
+
                 SS_slopes.append({"season " + str(season + 1): {"depth idx" + str(d_idx):
                                                                     {"depth idx": d_idx,
                                                                      "slope": result['slope'],
-                                                                     "lcl": result['lcl'],
-                                                                     "ucl": result['ucl'],
+                                                                     #"lcl": result['lcl'],
+                                                                     #"ucl": result['ucl'],
+                                                                     "lcl": lcl,
+                                                                     "ucl": ucl,
                                                                      "p": result['p'],
                                                                      "ss": result['ss'],
                                                                      "inter": inter_yr}}})
 
-
+    # analyze using the seasonal version of ss
+    # using a different toolbox here for this
+    #
     # catch if not depth integrated
-    if len(dat_seas[season].shape) == 1:
+    if len(dat_seas[0].shape) == 1:
+
+        print('todo')
+    else:
+
+        for d_idx in range(dat_seas[0].shape[0]): # assumes identical depths across seasons
+            dat_se_dep = []
+
+            # get data for one depth
+            for se in dat_seas:
+                dat_se_dep.append(se[d_idx,:])
+            # catch if all dep data empty
+            if np.isnan(dat_se_dep[:]).all():
+                continue
+            # requires reverse: shape = (date, seas) not shape = (seas, date)
+            dat_se_dep_np = np.asarray(dat_se_dep)
+            shp = dat_se_dep_np.shape
+            dat_se_dep_trn = np.transpose(dat_se_dep_np)
+            intra_slope, inter_slope = stats.mstats.sen_seasonal_slopes(dat_se_dep_trn)
+
+            s_tot = 0
+            var_s_tot = 0
+            all_slopes = []
+
+            # get the s stat and s variance for each season
+            for se in range(dat_se_dep_trn.shape[1]):
+                trend, h, p, z, Tau, s_se, var_s_se, slope, intercept = pymk.original_test(dat_se_dep_trn[:, se])
+                se_slopes = dijk(dat_se_dep_trn[:, se])
+                all_slopes = np.concatenate([all_slopes, se_slopes])
+                s_tot += s_se
+                var_s_tot += var_s_se
+
+            #all_slopes = np.concatenate([dijk(dat_se_dep_trn[:, i]) for i in range(dat_se_dep_trn.shape[1])])
+            all_slopes.sort()
+
+            z_tot = (s_tot - np.sign(s_tot)) / var_s_tot ** 0.5
+            p = 2 * (1 - norm.cdf(np.abs(z_tot), loc=0, scale=1))
+            if p <= 1 - alpha_mk / 100:
+                ss = alpha_mk
+            else:
+                ss = 0
+
+            # bit from mk_stats.py in mannkendall lib
+            # Apply the confidence limits
+            cconf = -norm.ppf((1 - alpha_cl / 100) / 2) * var_s_tot ** 0.5
+
+            # Note: because python starts at 0 and not 1, we need an additional "-1" to the following
+            # values of m_1 and m_2 to match the matlab implementation.
+            m_1 = (0.5 * (len(all_slopes) - cconf)) - 1
+            m_2 = (0.5 * (len(all_slopes) + cconf)) - 1
+
+            # Let's setup a quick interpolation scheme to get the best possible confidence limits
+            f = interp1d(np.arange(0, len(all_slopes), 1), all_slopes, kind='linear',
+                         fill_value=(all_slopes[0], all_slopes[-1]), assume_sorted=True, bounds_error=False)
+            lcl = f(m_1)
+            ucl = f(m_2)
+
+            # to-do: intercept
+            SS_slopes.append({"inter-seasonal": {"depth idx" + str(d_idx):
+                                                                {"depth idx": d_idx,
+                                                                 "slope": inter_slope,
+                                                                 "lcl": lcl,
+                                                                 "ucl": ucl,
+                                                                 "p": p,
+                                                                 "ss": ss,
+                                                                 "inter": 0}}})
+
+        # result, s, vari, z = mk.compute_mk_stat(dat_pytime, dat_davg_np, resolution,
+        #                                         alpha_mk=alpha_mk, alpha_cl=alpha_cl)
+
+
+    # analyse all data together, ignoring seasons
+    # catch if not depth integrated
+    if len(dat.shape) == 1:
         dat_davg_np = np.asarray(dat)
         result, s, vari, z = mk.compute_mk_stat(dat_pytime, dat_davg_np, resolution,
                                                 alpha_mk=alpha_mk, alpha_cl=alpha_cl)
@@ -463,6 +628,9 @@ def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, re
                                                     alpha_mk=alpha_mk, alpha_cl=alpha_cl)
             inter_yr = np.nanmedian(depth_data) - np.median(
                 np.arange(len(depth_data))[~np.isnan(depth_data.flatten())]) * result['slope']
+
+
+
             SS_slopes.append({"all seasons": {"depth idx" + str(d_idx):
                                                   {"depth idx": d_idx,
                                                    "slope": result['slope'],
@@ -472,11 +640,11 @@ def do_ss_seasons(dat, dat_seas, dat_pytime, dat_pytime_seas, seasons_per_yr, re
                                                    "ss": result['ss'],
                                                    "inter": inter_yr}}})
 
-
-
     # alt way with more detail
+    # I think t should take slopes not vals as input, but not sure?? - GO
     # t = mk.mkt.nb_tie(dat_davg_np, resolution)
     # (s, n) = mk.mks.s_test(dat_davg_np, dat_pytime)
+    # this may not be correct - k_var has data or list of slopes as input?? - GO 2024
     # k_var = mk.mkt.kendall_var(dat_davg_np, t, n)
     # z = mk.mks.std_normal_var(s, k_var)
     # mk_out = mk.mks.sen_slope(dat_pytime, dat_davg_np,k_var,alpha_cl=alpha_cl) # units of second!
@@ -511,6 +679,8 @@ def do_ss(dat, dat_pytime, resolution):
     alpha_cl = 90
 
     dat_davg_np = np.asarray(dat)
+    # this is not correct! should be slopes not data used as input
+    # it is as implemented in mk lib but seems incorrect when compared to glibert p. 227
     t = mk.mkt.nb_tie(dat_davg_np, resolution)
     (s, n) = mk.mks.s_test(dat_davg_np, dat_pytime)
     k_var = mk.mkt.kendall_var(dat_davg_np, t, n)

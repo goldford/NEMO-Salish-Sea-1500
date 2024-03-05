@@ -32,7 +32,7 @@ remove_nans = True
 use_abs = False # make sure false if you want trends in variable (not variability)!!
 alpha_DTS_CI = 0.05
 alpha_MK = 95
-time_inc = 'seasonal' # biweekly, monthly, seasonal, annual
+time_inc = 'seasonal' # biweekly, monthly, seasonal, annual (manuscipr seasonal)
 resolution = 0.0001  # of measurements to use in ties calc in Kendalls Tau and S
 if time_inc == 'annual': seasons_per_year = 1
 elif time_inc == 'seasonal': seasons_per_year = 4
@@ -206,6 +206,7 @@ ax.plot(d_pt_m1, d_m1, label='Mod', color='r', linestyle='--', linewidth=1)
 ax.xaxis.set_major_locator(mdates.YearLocator())
 ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
 ax.set_ylim(-1,1)
+
 plt.title("HOTSS v1.01 Modelled vs. Observed Temperature Anomalies at Nanoose Stn, " + str(depth_min) + " to " + str(depth_max) + " m")
 plt.xlabel('Time')
 plt.ylabel('Anomaly (deg C)')
@@ -216,8 +217,8 @@ fig, ax = plt.subplots()
 ax.fill_between(d_pt_o, d_o, d_m2, color='grey', label='', alpha=0.7, zorder=0)
 #ax.scatter(dat_pytime, dat_davg, label='Obs', s=1, color='r', marker='o')
 #ax.scatter(dat_pytime, mod_davg, label='Mod', s=1, color='g', marker='x')
-ax.plot(d_pt_o, d_o, label='Obs', color='k', linestyle='-', linewidth=1)
-ax.plot(d_pt_m2, d_m2, label='Mod', color='r', linestyle='--', linewidth=1)
+ax.plot(d_pt_o, d_o, label='Obs', color='k', linestyle='-', linewidth=0.8)
+ax.plot(d_pt_m2, d_m2, label='Mod', color='r', linestyle='--', linewidth=0.8)
 ax.xaxis.set_major_locator(mdates.YearLocator())
 ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
 ax.set_ylim(-1,1)
@@ -227,8 +228,10 @@ plt.ylabel('Anomaly (deg C)')
 plt.legend()
 plt.show()
 
-fig, ax = plt.subplots(figsize=(10,6))
-# window_size = 1
+fig, ax = plt.subplots(figsize=(7.5,4.5))
+
+# optional bit - using moving average for tiny publication plots
+# window_size = 2
 # # Apply the moving average using numpy.convolve
 # d_o = np.convolve(d_o, np.ones(window_size)/window_size, mode='valid')
 # d_o_full = np.convolve(d_o_full, np.ones(window_size)/window_size, mode='valid')
@@ -249,16 +252,18 @@ nan_mask = np.isnan(d_o_full)
 d_o_full = d_o_full[~nan_mask]
 d_pt_o_full = d_pt_o_full[~nan_mask]
 
-ax.fill_between(d_pt_o, d_o, d_m2, color='grey', label='', alpha=0.7, zorder=0)
+# for publication the fill between plots are made using
+# 'seasonal' and no moving avg
+ax.fill_between(d_pt_o, d_o, d_m2, color='lightgrey', label='', alpha=0.7, zorder=0)
 #ax.scatter(dat_pytime, dat_davg, label='Obs', s=1, color='r', marker='o')
 #ax.scatter(dat_pytime, mod_davg, label='Mod', s=1, color='g', marker='x')
-ax.plot(d_pt_o, d_o, label='Obs', color='k', linestyle='-', linewidth=1)
+ax.plot(d_pt_o, d_o, label='Obs.', color='k', linestyle='-', linewidth=1)
 # Filter indices of dates before the target date
 target_date = datetime(1980, 4, 1)
 filtered_indices = [index for index, date in enumerate(d_pt_o_full) if date < target_date]
 ax.plot(d_pt_o_full[filtered_indices], d_o_full[filtered_indices], label='', color='k', linestyle='-', linewidth=1)
-ax.plot(d_pt_m2, d_m2, label='Mod', color='r', linestyle='--', linewidth=1)
-ax.set_ylim(-1.4,1.4)
+ax.plot(d_pt_m2, d_m2, label='HOTSSea', color='r', linestyle='--', linewidth=1)
+ax.set_ylim(-1.2,1.2)
 
 # Add double-headed arrow and label
 ax.axvline(x=datetime(1980, 1, 1), color='k', linestyle='--')
@@ -270,11 +275,12 @@ ax.annotate('', xy=(datetime(1968, 1, 1), 0.8),
 ax.xaxis.set_major_locator(mdates.YearLocator(5))
 ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
 ax.grid(which='major', color='lightgrey')
+ax.axhline(y=0, color='black', linestyle='--', linewidth='0.5')
 
-plt.title("HOTSS v1.02 Modelled vs. Observed Temperature Anomalies at Nanoose Stn, " + str(depth_min) + " to " + str(depth_max) + " m")
+plt.title("HOTSSea v1.02 Modelled vs. Observed Temperature Anomalies at Nanoose Stn, " + str(depth_min) + " to " + str(depth_max) + " m")
 plt.ylabel('Anomaly (deg C)')
 plt.legend()
-plt.savefig('modvobs_nanoose.png', dpi=300)
+plt.savefig('modvobs_nanoose_' + time_inc + '.png', dpi=300)
 plt.show()
 
 
@@ -284,7 +290,7 @@ fig, ax = plt.subplots()
 #ax.fill_between(dat_pytime_seas_obs[seas], dat_seas_obs[seas], dat_seas_mod2[seas], color='grey', label='', alpha=0.7, zorder=0)
 #ax.scatter(dat_pytime, dat_davg, label='Obs', s=1, color='r', marker='o')
 #ax.scatter(dat_pytime, mod_davg, label='Mod', s=1, color='g', marker='x')
-ax.plot(d_pt_se_o[seas], d_se_o[seas], label='Obs', color='r', linestyle='-', linewidth=3)
+ax.plot(d_pt_se_o[seas], d_se_o[seas], label='Nanoose Temp. (4.5 - 400 m)', color='r', linestyle='-', linewidth=3)
 # Filter indices of dates before the target date
 target_date = datetime(1980, 12, 15)
 filtered_indices = [index for index, date in enumerate(d_pt_se_o_full[seas]) if date < target_date]
@@ -298,22 +304,26 @@ ax.set_ylabel('Anomaly (deg C)')
 
 
 # plot mortalities
-# since twinx not working, transform the mort data to same -1 to 1 scale
-#ax2 = ax.twinx()
+
 # path to salmon survival
 import pandas as pd
 import xarray as xr
 import os
 import datetime as dt
 import scipy.stats as sp
-mort_p = 'C:/Users/Greig/Sync/6. SSMSP Model/Model Greig/Data/1. Salmon/All Species Survival Exploitation/'
-mort_f = 'chinook_M_EWE_TS Jan 13.csv'
-mort_df = pd.read_csv(os.path.join(mort_p,mort_f), header=[0, 1, 2])
-group_names = mort_df.columns.levels[0][:-1]
+# mort_p = 'C:/Users/Greig/Sync/6. SSMSP Model/Model Greig/Data/1. Salmon/All Species Survival Exploitation/'
+# mort_f = 'chinook_M_EWE_TS Jan 13.csv'
+# mort_df = pd.read_csv(os.path.join(mort_p,mort_f), header=[0, 1, 2])
+# group_names = mort_df.columns.levels[0][:-1]
+mort_p = 'C:/Users/Greig/Sync/6. SSMSP Model/Model Greig/Data/1. Salmon/Chinook Survival Freshwater 2022/MODIFIED'
+mort_f = 'salish_M_ocntp_sog_1971-2017.csv'
+mort_df = pd.read_csv(os.path.join(mort_p,mort_f), header=[0])
+
+group_names = mort_df.columns[1:]
 #mort_dt = mort_df.iloc[:, 0].apply(lambda x: datetime.strptime(str(x), '%Y'))
 mort_dt = mort_df.iloc[:, 0]
 mort_df_np = np.asarray(mort_dt.values)
-mort_pydt = [dt.datetime(x,1,1) for x in mort_df_np]
+mort_pydt = [dt.datetime(x,6,15) for x in mort_df_np]
 mort_pydt_np = np.asarray(mort_pydt)
 
 mort_mean = np.nanmean(mort_df.iloc[:,1:], axis=1)
@@ -325,20 +335,22 @@ mort_ucl = mort_mean + mort_z * (mort_std / np.sqrt(len(mort_mean)))
 mort_lcl = mort_mean - mort_z * (mort_std / np.sqrt(len(mort_mean)))
 # take mean of all mort data
 mort_mean = ((mort_mean / 4) - 1)
-ax.plot(mort_pydt_np, mort_mean, label='Mort', color='b', linewidth=3)
 
-for grp_name in group_names:
-    mort_dat = mort_df[grp_name].values
-    mort_dat = ((mort_dat / 4) - 1)
-    ax.plot(mort_pydt_np, mort_dat, label='', color='grey', linewidth=1)
-ax.legend()
-
-# ax2.set_ylim(0,8)
+# since twinx not working, transform the mort data to same -1 to 1 scale
+# ax2 = ax.twinx()
+# ax.plot(mort_pydt_np, mort_mean, label='SoG Chinook Mort. (Ocean Type)', color='b', linewidth=3)
+#
+# for grp_name in group_names:
+#     mort_dat = mort_df[grp_name].values
+#     mort_dat = ((mort_dat / 4) - 1)
+#     ax.plot(mort_pydt_np, mort_dat, label='', color='grey', linewidth=1)
+# ax.legend()
+# ax2.set_ylim(-1,1)
 # ax2.set_ylabel('Mort')
 # ax2.legend()
 # ax2.xaxis.set_major_locator(mdates.YearLocator())
 # ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
 
-
 # plt.title("Season " + str(seas) + ": HOTSS v1.02 Modelled vs. Observed Temperature Anomalies at Nanoose Stn, " + str(depth_min) + " to " + str(depth_max) + " m")
+plt.savefig('ChinookMortJustTempsForPPT.png', dpi=300)
 plt.show()
