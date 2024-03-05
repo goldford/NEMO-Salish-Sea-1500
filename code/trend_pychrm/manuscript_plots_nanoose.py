@@ -277,7 +277,7 @@ ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
 ax.grid(which='major', color='lightgrey')
 ax.axhline(y=0, color='black', linestyle='--', linewidth='0.5')
 
-plt.title("HOTSSea v1.02 Modelled vs. Observed Temperature Anomalies at Nanoose Stn, " + str(depth_min) + " to " + str(depth_max) + " m")
+#plt.title("HOTSSea v1.02 Modelled vs. Observed Temperature Anomalies at Nanoose Stn, " + str(depth_min) + " to " + str(depth_max) + " m")
 plt.ylabel('Anomaly (deg C)')
 plt.legend()
 plt.savefig('modvobs_nanoose_' + time_inc + '.png', dpi=300)

@@ -1,6 +1,5 @@
 # Created Feb 9 2024 by G Oldford
 # Purpose: seasonal and nonseasonal trend estimation over all depth levs
-# Experimental
 
 from GO_tools import get_dat, do_ss_seasons
 from statsmodels.tsa.stattools import acf
@@ -444,6 +443,9 @@ plt.tight_layout()
 # plt.savefig('trend_alldep_nanoose_modobs_wletters.png', dpi=300)
 plt.savefig('trend_alldep_nanoose_obs_twoperiods_' +
             str(year_min) + '-' + str(year_max) + '.png',
+            dpi=300)
+plt.savefig('trend_alldep_nanoose_obs_twoperiods_' +
+            str(year_min) + '-' + str(year_max) + '.eps',
             dpi=300)
 plt.show()
 
